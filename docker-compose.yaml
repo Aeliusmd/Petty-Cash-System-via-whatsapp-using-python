@@ -1,0 +1,76 @@
+# https://waha.devlike.pro/docs/how-to/install/
+services:
+  # ========================================
+  # WAHA - WhatsApp HTTP API
+  # ========================================
+  waha:
+    restart: always
+    image: devlikeapro/waha:latest
+
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+    ports:
+      - "127.0.0.1:3000:3000/tcp"
+
+    volumes:
+      - "./sessions:/app/.sessions"
+      - "./media:/app/.media"
+
+    env_file:
+      - .env
+
+    environment:
+      - WHATSAPP_HOOK_URL=http://backend:4101/webhooks/waha
+      - WHATSAPP_HOOK_EVENTS=message
+      - WHATSAPP_HOOK_HMAC_KEY=supersecretkey
+
+    networks:
+      - petty-cash-network
+
+    depends_on:
+      - backend
+
+  # ========================================
+  # Backend - Python FastAPI Handler
+  # ========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: always
+
+    ports:
+      - "127.0.0.1:4101:4101"
+
+    env_file:
+      - .env
+
+    environment:
+      - PORT=4101
+      - WAHA_BASE_URL=http://waha:3000
+      - DB_HOST=host.docker.internal
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    networks:
+      - petty-cash-network
+
+networks:
+  petty-cash-network:
+    driver: bridge

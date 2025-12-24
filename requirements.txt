@@ -1,0 +1,27 @@
+# Petty Cash System via WhatsApp - Python Backend
+# FastAPI + asyncpg + boto3
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# HTTP Client
+httpx==0.26.0
+
+# Environment
+python-dotenv==1.0.0
+
+# Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# AWS SDK
+boto3==1.34.20
+
+# Utilities
+python-json-logger==2.0.7

@@ -37,6 +37,7 @@ WhatsApp-based petty cash claim system using WAHA and **Python/FastAPI** with Po
 ```powershell
 # From project root
 cd "d:\MedCube\Projects\4th Month\Petty Cash System via whatsapp - python"
+docker compose down
 docker compose up --build
 ```
 

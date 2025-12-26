@@ -16,6 +16,7 @@ from app.models import employee as employee_model
 from app.models import rates as rates_model
 from app.models import claim as claim_model
 from app.models import conversation as conversation_model
+from app.services.location_service import location_service
 
 
 def normalize_text(text: str) -> str:
@@ -126,7 +127,68 @@ async def generate_reply(message_text: str, chat_id: str) -> Optional[str]:
         except:
             context = {}
 
-    # ===== HANDLE RECEIPT/DOCUMENT UPLOADS =====
+    # ===== HANDLE LOCATION SHARED =====
+    if '[LOCATION_SHARED]' in message_text:
+        match = re.search(r'lat:([0-9.-]+) lon:([0-9.-]+)', message_text)
+        if match:
+            lat, lon = float(match.group(1)), float(match.group(2))
+            
+            # 1. Reverse geocode to get city
+            city = await location_service.get_city_from_coordinates(lat, lon)
+            
+            if not city:
+                return "❌ Could not detect city from location. Please enter it manually (e.g., 'Kandy')."
+            
+            # 2. Find nearest business location
+            location = await location_service.find_nearest_business_location(city)
+            
+            if not location:
+                return f"📍 Detected City: *{city}*\n❌ This location is not in our system. Please enter a valid business location manually."
+            
+            # 3. Auto-start Batta Claim
+            # Get batta rate
+            rate = await rates_model.get_batta_rate(employee['grade_id'], location['id'])
+            
+            if not rate:
+                return f"📍 Detected: *{location['name']}*\n⚠️ No batta rate found for Grade {employee.get('grade_code')}. Please contact admin."
+
+            await conversation_model.update(chat_id, {
+                'current_step': 'batta_days',
+                'category': 'BATTA',
+                'context': {
+                    'location_id': location['id'],
+                    'location_name': location['name'],
+                    'rate_per_day': rate,
+                    'detected_from_gps': True
+                }
+            })
+
+            return f"""📍 Location Detected: *{location['name']}*
+💰 Rate: *{format_currency(rate)}/day* (Grade {employee.get('grade_code')})
+
+How many days?"""
+
+    # ===== HANDLE GREETINGS - SHOW MAIN MENU =====
+    if text in ('hi', 'hello', 'hey', 'menu', 'start'):
+        await conversation_model.update(chat_id, {
+            'current_step': 'menu',
+            'category': None,
+            'context': {}
+        })
+        
+        return f"""🙏 Welcome, *{employee['name']}*!
+
+You are registered as Grade {employee.get('grade_code') or 'N/A'} at {employee.get('location_name') or 'N/A'}.
+
+Please select a category:
+1️⃣ Batta (Daily Allowance)
+2️⃣ Fuel Expenses
+3️⃣ Accommodation
+4️⃣ Sundry Expenses
+
+Reply with the number or category name."""
+
+    # ===== HANDLE RECEIPT/DOCUMENT UPLOADED =====
     if '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
         # Extract info from the uploaded receipt
         extracted_match = re.search(r'Extracted text: ([\s\S]*?)(?:\nDetected amount|$)', message_text)

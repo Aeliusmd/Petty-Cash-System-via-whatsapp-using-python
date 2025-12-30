@@ -79,5 +79,4 @@ frontend/out/
 # ========================
 # Keep Example Files
 # ========================
-!.env.example
-!frontend/.env.example
+# (removed - no longer tracking .env.example)

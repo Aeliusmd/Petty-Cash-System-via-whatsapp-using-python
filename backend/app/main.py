@@ -11,11 +11,13 @@ import random
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 # Load environment variables from root .env file
 # Try multiple locations: root, backend, current directory
@@ -30,6 +32,9 @@ from app.db import db
 from app import waha_client
 from app import reply_engine
 from app.services import textract_service
+from app.services import notification_service
+from app.models import claim as claim_model
+from app.models import employee as employee_model
 
 
 # Message deduplication cache (prevents processing same message multiple times)
@@ -81,6 +86,24 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# CORS middleware for frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify your Next.js domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Pydantic models for API requests
+class RejectClaimRequest(BaseModel):
+    reason: str
+
+
+class ApproveClaimRequest(BaseModel):
+    final_amount: Optional[float] = None
 
 
 @app.get("/")
@@ -315,7 +338,268 @@ async def startup_info():
     port = os.getenv('PORT', '4101')
     print(f'🚀 WhatsApp Backend running on port {port}')
     print(f'📡 Webhook endpoint: POST /webhooks/waha')
+    print(f'📡 API endpoints: /api/claims, /api/stats')
     print(f'🏥 Health check: GET /health')
+
+
+# =============================================
+# CLAIMS MANAGEMENT API ENDPOINTS
+# =============================================
+
+@app.get("/api/claims")
+async def get_claims(
+    status: Optional[str] = Query(None, description="Filter by status: PENDING, APPROVED, REJECTED"),
+    employee_id: Optional[int] = Query(None, description="Filter by employee ID"),
+    manager_id: Optional[int] = Query(None, description="Filter by manager ID"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Get list of claims with optional filters
+    """
+    try:
+        from app.db import db
+        
+        # Build query based on filters
+        query = """
+            SELECT c.*, e.name as employee_name, e.employee_code, e.phone_number,
+                   g.code as grade_code, cat.code as category_code, cat.name as category_name,
+                   l.name as location_name, s.code as status_code, s.name as status_name,
+                   m.name as manager_name, a.name as approver_name
+            FROM claims c
+            JOIN employees e ON c.employee_id = e.id
+            LEFT JOIN grades g ON e.grade_id = g.id
+            JOIN claim_categories cat ON c.category_id = cat.id
+            LEFT JOIN locations l ON c.location_id = l.id
+            JOIN claim_statuses s ON c.status_id = s.id
+            LEFT JOIN employees m ON c.manager_id = m.id
+            LEFT JOIN employees a ON c.approved_by = a.id
+            WHERE 1=1
+        """
+        params = []
+        param_index = 1
+        
+        if status:
+            query += f" AND s.code = ${param_index}"
+            params.append(status.upper())
+            param_index += 1
+            
+        if employee_id:
+            query += f" AND c.employee_id = ${param_index}"
+            params.append(employee_id)
+            param_index += 1
+            
+        if manager_id:
+            query += f" AND c.manager_id = ${param_index}"
+            params.append(manager_id)
+            param_index += 1
+        
+        query += f" ORDER BY c.created_at DESC LIMIT ${param_index} OFFSET ${param_index + 1}"
+        params.extend([limit, offset])
+        
+        claims = await db.query(query, *params)
+        
+        # Get total count for pagination
+        count_query = "SELECT COUNT(*) as total FROM claims c JOIN claim_statuses s ON c.status_id = s.id WHERE 1=1"
+        count_params = []
+        param_index = 1
+        
+        if status:
+            count_query += f" AND s.code = ${param_index}"
+            count_params.append(status.upper())
+            param_index += 1
+        if employee_id:
+            count_query += f" AND c.employee_id = ${param_index}"
+            count_params.append(employee_id)
+            param_index += 1
+        if manager_id:
+            count_query += f" AND c.manager_id = ${param_index}"
+            count_params.append(manager_id)
+            
+        count_result = await db.query(count_query, *count_params)
+        total = count_result[0]['total'] if count_result else 0
+        
+        return {
+            "claims": claims,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        print(f"❌ Error fetching claims: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claims/{claim_id}")
+async def get_claim(claim_id: int):
+    """
+    Get a single claim by ID with full details
+    """
+    try:
+        claim = await claim_model.find_by_id(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        return claim
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching claim {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claims/{claim_id}/approve")
+async def approve_claim(claim_id: int, request: ApproveClaimRequest = None):
+    """
+    Approve a claim and notify the staff via WhatsApp
+    """
+    try:
+        # Get claim first
+        claim = await claim_model.find_by_id(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        if claim.get('status_code') != 'PENDING':
+            raise HTTPException(status_code=400, detail=f"Claim is already {claim.get('status_name')}")
+        
+        # Approve the claim (using manager_id as approver for now)
+        final_amount = request.final_amount if request else None
+        approver_id = claim.get('manager_id') or claim.get('employee_id')
+        
+        updated_claim = await claim_model.approve(claim_id, approver_id, final_amount)
+        
+        # Notify staff via WhatsApp
+        await notification_service.notify_staff_of_approval(updated_claim)
+        
+        # Fetch updated claim with full details
+        full_claim = await claim_model.find_by_id(claim_id)
+        
+        return {
+            "success": True,
+            "message": "Claim approved successfully",
+            "claim": full_claim
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error approving claim {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claims/{claim_id}/reject")
+async def reject_claim(claim_id: int, request: RejectClaimRequest):
+    """
+    Reject a claim with a reason and notify the staff via WhatsApp
+    """
+    try:
+        # Get claim first
+        claim = await claim_model.find_by_id(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        if claim.get('status_code') != 'PENDING':
+            raise HTTPException(status_code=400, detail=f"Claim is already {claim.get('status_name')}")
+        
+        if not request.reason or len(request.reason.strip()) < 3:
+            raise HTTPException(status_code=400, detail="Rejection reason is required (minimum 3 characters)")
+        
+        # Reject the claim
+        approver_id = claim.get('manager_id') or claim.get('employee_id')
+        updated_claim = await claim_model.reject(claim_id, approver_id, request.reason.strip())
+        
+        # Notify staff via WhatsApp
+        await notification_service.notify_staff_of_rejection(updated_claim, request.reason.strip())
+        
+        # Fetch updated claim with full details
+        full_claim = await claim_model.find_by_id(claim_id)
+        
+        return {
+            "success": True,
+            "message": "Claim rejected",
+            "claim": full_claim
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error rejecting claim {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats")
+async def get_stats():
+    """
+    Get dashboard statistics for claims
+    """
+    try:
+        from app.db import db
+        
+        # Overall stats
+        stats_query = """
+            SELECT 
+                COUNT(*) as total_claims,
+                COUNT(*) FILTER (WHERE s.code = 'PENDING') as pending_claims,
+                COUNT(*) FILTER (WHERE s.code = 'APPROVED') as approved_claims,
+                COUNT(*) FILTER (WHERE s.code = 'REJECTED') as rejected_claims,
+                COALESCE(SUM(c.final_amount) FILTER (WHERE s.code = 'APPROVED'), 0) as total_approved_amount,
+                COALESCE(SUM(c.user_amount) FILTER (WHERE s.code = 'PENDING'), 0) as pending_amount
+            FROM claims c
+            JOIN claim_statuses s ON c.status_id = s.id
+        """
+        stats = await db.query(stats_query)
+        
+        # Category breakdown
+        category_query = """
+            SELECT cat.name as category, cat.code as category_code,
+                   COUNT(*) as count,
+                   COALESCE(SUM(c.final_amount), 0) as total_amount
+            FROM claims c
+            JOIN claim_categories cat ON c.category_id = cat.id
+            JOIN claim_statuses s ON c.status_id = s.id
+            WHERE s.code = 'APPROVED'
+            GROUP BY cat.id, cat.name, cat.code
+            ORDER BY total_amount DESC
+        """
+        categories = await db.query(category_query)
+        
+        # Recent claims (last 5)
+        recent_query = """
+            SELECT c.claim_number, c.created_at, e.name as employee_name,
+                   cat.name as category_name, c.final_amount, s.code as status_code
+            FROM claims c
+            JOIN employees e ON c.employee_id = e.id
+            JOIN claim_categories cat ON c.category_id = cat.id
+            JOIN claim_statuses s ON c.status_id = s.id
+            ORDER BY c.created_at DESC
+            LIMIT 5
+        """
+        recent = await db.query(recent_query)
+        
+        return {
+            "overview": stats[0] if stats else {},
+            "categories": categories,
+            "recent_claims": recent
+        }
+        
+    except Exception as e:
+        print(f"❌ Error fetching stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/employees")
+async def get_employees(role: Optional[str] = Query(None)):
+    """
+    Get list of employees (for dropdowns, etc.)
+    """
+    try:
+        employees = await employee_model.find_all()
+        if role:
+            employees = [e for e in employees if e.get('role') == role]
+        return {"employees": employees}
+    except Exception as e:
+        print(f"❌ Error fetching employees: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

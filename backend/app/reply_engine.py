@@ -188,6 +188,90 @@ Please select a category:
 
 Reply with the number or category name."""
 
+    # ===== HANDLE APPEAL COMMAND =====
+    if text == 'appeal':
+        # Find the most recent rejected claim for this employee
+        rejected_claim = await claim_model.find_latest_rejected_for_employee(employee['id'])
+        
+        if not rejected_claim:
+            return """❌ *No rejected claims found*
+
+You don't have any rejected claims to appeal.
+Type "hi" for the main menu."""
+        
+        # Start appeal flow - ask for notes
+        await conversation_model.update(chat_id, {
+            'current_step': 'appeal_notes',
+            'category': 'APPEAL',
+            'context': {
+                'claim_id': rejected_claim['id'],
+                'claim_number': rejected_claim['claim_number'],
+                'category_name': rejected_claim.get('category_name', 'N/A')
+            }
+        })
+        
+        return f"""🔄 *Appeal Claim #{rejected_claim['claim_number']}*
+
+📁 Category: {rejected_claim.get('category_name', 'N/A')}
+📝 Previous Rejection: {rejected_claim.get('rejection_reason', 'No reason provided')}
+
+Please add a note explaining why you are appealing:
+_(You can also upload additional documents/receipts)_
+
+Or type *skip* to submit without notes."""
+
+    # ===== HANDLE APPEAL NOTES STEP =====
+    current_step = state.get('current_step', 'initial')
+    
+    if current_step == 'appeal_notes':
+        from app.services import notification_service
+        
+        claim_id = context.get('claim_id')
+        claim_number = context.get('claim_number')
+        category_name = context.get('category_name')
+        
+        if not claim_id:
+            await conversation_model.reset(chat_id)
+            return "❌ Session expired. Type *appeal* to try again."
+        
+        # User wants to skip adding notes
+        if text == 'skip':
+            appeal_notes = None
+        else:
+            appeal_notes = message_text  # Use original text to preserve formatting
+        
+        try:
+            # Appeal the claim with notes
+            updated_claim = await claim_model.appeal(claim_id, employee['id'], appeal_notes)
+            
+            # Reset conversation
+            await conversation_model.reset(chat_id)
+            
+            # Notify staff of appeal submission
+            await notification_service.notify_staff_of_appeal_submitted(updated_claim)
+            
+            # Notify manager of appeal (with notes)
+            await notification_service.notify_manager_of_appeal(updated_claim, appeal_notes)
+            
+            notes_msg = f"\n📝 *Your Note:* {appeal_notes[:100]}..." if appeal_notes and len(appeal_notes) > 100 else (f"\n📝 *Your Note:* {appeal_notes}" if appeal_notes else "")
+            
+            return f"""📤 *Appeal Submitted!*
+
+📋 Claim #: *{claim_number}*
+📁 Category: {category_name}{notes_msg}
+
+Your claim has been sent for review again.
+You will be notified of the decision.
+
+Type "hi" or "menu" for more options."""
+        except ValueError as e:
+            await conversation_model.reset(chat_id)
+            return f"❌ {str(e)}\nType \"hi\" for the main menu."
+        except Exception as e:
+            print(f"❌ Appeal error: {e}")
+            await conversation_model.reset(chat_id)
+            return "❌ Could not process appeal. Please try again or contact support."
+
     # ===== HANDLE RECEIPT/DOCUMENT UPLOADED =====
     if '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
         # Extract info from the uploaded receipt

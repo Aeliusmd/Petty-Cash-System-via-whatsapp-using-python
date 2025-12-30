@@ -24,10 +24,22 @@ interface Claim {
   final_amount: number | null;
   description: string | null;
   rejection_reason: string | null;
+  appeal_count?: number;
   manager_name: string | null;
   approver_name: string | null;
   created_at: string;
   approved_at: string | null;
+}
+
+interface HistoryItem {
+  id: number;
+  from_status_code: string | null;
+  from_status_name: string | null;
+  to_status_code: string;
+  to_status_name: string;
+  changed_by_name: string | null;
+  reason: string | null;
+  created_at: string;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
@@ -52,7 +64,20 @@ function getStatusColor(status: string): string {
     case 'PENDING': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
     case 'APPROVED': return 'bg-green-100 text-green-800 border-green-300';
     case 'REJECTED': return 'bg-red-100 text-red-800 border-red-300';
+    case 'APPEALED': return 'bg-purple-100 text-purple-800 border-purple-300';
     default: return 'bg-gray-100 text-gray-800 border-gray-300';
+  }
+}
+
+function getStatusIcon(status: string): string {
+  switch (status) {
+    case 'PENDING': return '⏳';
+    case 'APPROVED': return '✅';
+    case 'REJECTED': return '❌';
+    case 'APPEALED': return '🔄';
+    case 'DRAFT': return '📝';
+    case 'PAID': return '💵';
+    default: return '📋';
   }
 }
 
@@ -72,6 +97,7 @@ export default function ClaimDetailPage() {
   const claimId = params.id as string;
 
   const [claim, setClaim] = useState<Claim | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -80,6 +106,7 @@ export default function ClaimDetailPage() {
 
   useEffect(() => {
     fetchClaim();
+    fetchHistory();
   }, [claimId]);
 
   async function fetchClaim() {
@@ -95,6 +122,18 @@ export default function ClaimDetailPage() {
     }
   }
 
+  async function fetchHistory() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/claims/${claimId}/history`);
+      if (res.ok) {
+        const data = await res.json();
+        setHistory(data.history || []);
+      }
+    } catch (err) {
+      console.error('Failed to load history:', err);
+    }
+  }
+
   async function handleApprove() {
     if (!confirm('Are you sure you want to approve this claim?')) return;
     
@@ -105,11 +144,12 @@ export default function ClaimDetailPage() {
         headers: { 'Content-Type': 'application/json' },
       });
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.detail || 'Failed to approve');
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to approve');
       }
       alert('✅ Claim approved! Staff has been notified via WhatsApp.');
       fetchClaim();
+      fetchHistory();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to approve claim');
     } finally {
@@ -131,12 +171,14 @@ export default function ClaimDetailPage() {
         body: JSON.stringify({ reason: rejectReason }),
       });
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.detail || 'Failed to reject');
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to reject');
       }
       alert('❌ Claim rejected! Staff has been notified via WhatsApp with the reason.');
       setShowRejectForm(false);
+      setRejectReason('');
       fetchClaim();
+      fetchHistory();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to reject claim');
     } finally {
@@ -163,6 +205,8 @@ export default function ClaimDetailPage() {
     );
   }
 
+  const canProcess = claim.status_code === 'PENDING' || claim.status_code === 'APPEALED';
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Breadcrumb */}
@@ -184,14 +228,28 @@ export default function ClaimDetailPage() {
               </div>
             </div>
           </div>
-          <span className={`px-4 py-2 rounded-full text-sm font-semibold border ${getStatusColor(claim.status_code)}`}>
-            {claim.status_name}
-          </span>
+          <div className="flex items-center gap-2">
+            {(claim.appeal_count ?? 0) > 0 && (
+              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                🔄 Appeal #{claim.appeal_count}
+              </span>
+            )}
+            <span className={`px-4 py-2 rounded-full text-sm font-semibold border ${getStatusColor(claim.status_code)}`}>
+              {claim.status_name}
+            </span>
+          </div>
         </div>
 
-        {/* Action Buttons for Pending Claims */}
-        {claim.status_code === 'PENDING' && (
+        {/* Action Buttons for Pending/Appealed Claims */}
+        {canProcess && (
           <div className="mt-6 pt-6 border-t">
+            {claim.status_code === 'APPEALED' && (
+              <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                <p className="text-sm text-purple-800">
+                  🔄 This claim has been appealed by the staff member. Please review and make a decision.
+                </p>
+              </div>
+            )}
             {!showRejectForm ? (
               <div className="flex gap-4">
                 <button
@@ -254,6 +312,47 @@ export default function ClaimDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Status History Timeline */}
+      {history.length > 0 && (
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <span>📜</span> Status History
+          </h3>
+          <div className="space-y-4">
+            {history.map((item, index) => (
+              <div key={item.id} className="flex gap-4">
+                <div className="flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${getStatusColor(item.to_status_code)}`}>
+                    {getStatusIcon(item.to_status_code)}
+                  </div>
+                  {index < history.length - 1 && (
+                    <div className="w-0.5 h-full bg-gray-200 mt-2"></div>
+                  )}
+                </div>
+                <div className="flex-1 pb-4">
+                  <div className="flex items-center gap-2">
+                    {item.from_status_name && (
+                      <>
+                        <span className="text-gray-500">{item.from_status_name}</span>
+                        <span className="text-gray-400">→</span>
+                      </>
+                    )}
+                    <span className="font-medium text-gray-800">{item.to_status_name}</span>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">{formatDate(item.created_at)}</p>
+                  {item.changed_by_name && (
+                    <p className="text-sm text-gray-500">By: {item.changed_by_name}</p>
+                  )}
+                  {item.reason && (
+                    <p className="text-sm text-gray-600 mt-1 italic">"{item.reason}"</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Claim Details */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

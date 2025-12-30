@@ -57,6 +57,16 @@ Copy-Item .env.example .env
 # Edit .env with your actual credentials
 ```
 
+**Create and Activate Environment**
+
+```powershell
+# Create environment for Python 3.12
+conda create --name petty_cash python=3.12 -y
+
+# Activate the environment
+conda activate petty_cash
+```
+
 ### Step 2: Set Up Database
 
 ```powershell
@@ -69,6 +79,13 @@ python setup_db.py
 docker compose up --build
 ```
 
+### If you currently run the backend services, you can restart them with:
+
+```powershell
+docker compose down
+docker compose up --build
+```
+
 ### Step 4: Start Admin Panel (Frontend)
 
 ```powershell
@@ -77,7 +94,7 @@ npm install
 npm run dev
 ```
 
-- **Admin Panel**: http://localhost:3000
+- **Admin Panel**: http://localhost:3001
 - **Backend API**: http://localhost:4101
 - **WAHA Dashboard**: http://localhost:3000/dashboard/
 
@@ -188,6 +205,12 @@ python add_employee.py 94779876543 "Jane Manager" A CMB manager
 ### Run Backend Locally (without Docker)
 
 ```powershell
+# Create conda environment
+conda create -n pettycash python=3.11
+
+# Activate conda environment
+conda activate pettycash
+
 # Install dependencies
 pip install -r requirements.txt
 

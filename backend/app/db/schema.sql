@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS claims (
     approved_by INT REFERENCES employees(id),
     approved_at TIMESTAMP,
     rejection_reason TEXT,
+    appeal_count INT DEFAULT 0,
     is_exception BOOLEAN DEFAULT FALSE,
     exception_reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -173,6 +174,20 @@ CREATE TABLE IF NOT EXISTS claim_comments (
     comment TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Claim Status History (tracks approvals, rejections, appeals)
+CREATE TABLE IF NOT EXISTS claim_status_history (
+    id SERIAL PRIMARY KEY,
+    claim_id INT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+    from_status_id INT REFERENCES claim_statuses(id),
+    to_status_id INT NOT NULL REFERENCES claim_statuses(id),
+    changed_by INT REFERENCES employees(id),
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for history lookups
+CREATE INDEX IF NOT EXISTS idx_claim_status_history_claim ON claim_status_history(claim_id);
 
 -- =============================================
 -- CONVERSATION STATE (WhatsApp flow)

@@ -45,6 +45,7 @@ function getStatusColor(status: string): string {
     case 'PENDING': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
     case 'APPROVED': return 'bg-green-100 text-green-800 border-green-200';
     case 'REJECTED': return 'bg-red-100 text-red-800 border-red-200';
+    case 'APPEALED': return 'bg-purple-100 text-purple-800 border-purple-200';
     default: return 'bg-gray-100 text-gray-800 border-gray-200';
   }
 }
@@ -145,7 +146,7 @@ function ClaimsContent() {
     }
   }
 
-  const statuses = ['', 'PENDING', 'APPROVED', 'REJECTED'];
+  const statuses = ['', 'PENDING', 'APPEALED', 'APPROVED', 'REJECTED'];
 
   return (
     <div className="space-y-6">
@@ -241,7 +242,7 @@ function ClaimsContent() {
                       {formatDate(claim.created_at)}
                     </td>
                     <td className="px-6 py-4">
-                      {claim.status_code === 'PENDING' && rejectingId !== claim.id && (
+                      {(claim.status_code === 'PENDING' || claim.status_code === 'APPEALED') && rejectingId !== claim.id && (
                         <div className="flex gap-2">
                           <button
                             onClick={() => handleApprove(claim.id)}
@@ -259,7 +260,7 @@ function ClaimsContent() {
                           </button>
                         </div>
                       )}
-                      {claim.status_code === 'PENDING' && rejectingId === claim.id && (
+                      {(claim.status_code === 'PENDING' || claim.status_code === 'APPEALED') && rejectingId === claim.id && (
                         <div className="flex items-center gap-2">
                           <input
                             type="text"

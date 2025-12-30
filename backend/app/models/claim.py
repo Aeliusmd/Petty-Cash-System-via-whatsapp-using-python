@@ -142,3 +142,90 @@ async def get_stats(employee_id: int) -> dict:
     """, employee_id)
     
     return result[0] if result else {}
+
+
+async def record_status_change(claim_id: int, from_status_code: str, to_status_code: str, 
+                                changed_by: int = None, reason: str = None) -> dict:
+    """Record a status change in claim_status_history"""
+    # Get status IDs
+    from_status = await db.query("SELECT id FROM claim_statuses WHERE code = $1", from_status_code) if from_status_code else None
+    to_status = await db.query("SELECT id FROM claim_statuses WHERE code = $1", to_status_code)
+    
+    from_status_id = from_status[0]['id'] if from_status else None
+    to_status_id = to_status[0]['id'] if to_status else None
+    
+    result = await db.query("""
+        INSERT INTO claim_status_history (claim_id, from_status_id, to_status_id, changed_by, reason)
+        VALUES ($1, $2, $3, $4, $5) RETURNING *
+    """, claim_id, from_status_id, to_status_id, changed_by, reason)
+    
+    return result[0] if result else {}
+
+
+async def appeal(claim_id: int, employee_id: int, notes: str = None) -> dict:
+    """Appeal a rejected claim - changes status to APPEALED with optional notes"""
+    # Get the claim to verify it's rejected
+    claim = await find_by_id(claim_id)
+    if not claim:
+        raise ValueError("Claim not found")
+    
+    if claim.get('status_code') != 'REJECTED':
+        raise ValueError("Only rejected claims can be appealed")
+    
+    # Get APPEALED status ID
+    status_result = await db.query("SELECT id FROM claim_statuses WHERE code = 'APPEALED'")
+    if not status_result:
+        # If APPEALED status doesn't exist, create it
+        status_result = await db.query("""
+            INSERT INTO claim_statuses (code, name, description, display_order)
+            VALUES ('APPEALED', 'Under Appeal', 'Staff has appealed the rejection', 5)
+            RETURNING id
+        """)
+    status_id = status_result[0]['id']
+    
+    # Record the status change with notes
+    reason = f"Staff appealed: {notes}" if notes else "Staff appealed the rejection"
+    await record_status_change(claim_id, 'REJECTED', 'APPEALED', employee_id, reason)
+    
+    # Update the claim
+    result = await db.query("""
+        UPDATE claims SET status_id = $1, appeal_count = COALESCE(appeal_count, 0) + 1,
+                          rejection_reason = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 RETURNING *
+    """, status_id, claim_id)
+    
+    return result[0] if result else {}
+
+
+async def get_history(claim_id: int) -> list[dict]:
+    """Get status history for a claim"""
+    result = await db.query("""
+        SELECT h.*, 
+               fs.code as from_status_code, fs.name as from_status_name,
+               ts.code as to_status_code, ts.name as to_status_name,
+               e.name as changed_by_name
+        FROM claim_status_history h
+        LEFT JOIN claim_statuses fs ON h.from_status_id = fs.id
+        JOIN claim_statuses ts ON h.to_status_id = ts.id
+        LEFT JOIN employees e ON h.changed_by = e.id
+        WHERE h.claim_id = $1
+        ORDER BY h.created_at ASC
+    """, claim_id)
+    
+    return result
+
+
+async def find_latest_rejected_for_employee(employee_id: int) -> Optional[dict]:
+    """Find the most recent rejected claim for an employee"""
+    result = await db.query("""
+        SELECT c.*, cat.code as category_code, cat.name as category_name,
+               s.code as status_code, s.name as status_name
+        FROM claims c
+        JOIN claim_categories cat ON c.category_id = cat.id
+        JOIN claim_statuses s ON c.status_id = s.id
+        WHERE c.employee_id = $1 AND s.code = 'REJECTED'
+        ORDER BY c.updated_at DESC
+        LIMIT 1
+    """, employee_id)
+    
+    return result[0] if result else None

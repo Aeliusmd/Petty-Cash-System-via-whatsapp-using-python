@@ -459,12 +459,18 @@ async def approve_claim(claim_id: int, request: ApproveClaimRequest = None):
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
         
-        if claim.get('status_code') != 'PENDING':
+        current_status = claim.get('status_code')
+        if current_status not in ('PENDING', 'APPEALED'):
             raise HTTPException(status_code=400, detail=f"Claim is already {claim.get('status_name')}")
         
         # Approve the claim (using manager_id as approver for now)
         final_amount = request.final_amount if request else None
         approver_id = claim.get('manager_id') or claim.get('employee_id')
+        
+        # Record status change in history
+        await claim_model.record_status_change(
+            claim_id, current_status, 'APPROVED', approver_id, 'Approved by manager'
+        )
         
         updated_claim = await claim_model.approve(claim_id, approver_id, final_amount)
         
@@ -498,7 +504,8 @@ async def reject_claim(claim_id: int, request: RejectClaimRequest):
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
         
-        if claim.get('status_code') != 'PENDING':
+        current_status = claim.get('status_code')
+        if current_status not in ('PENDING', 'APPEALED'):
             raise HTTPException(status_code=400, detail=f"Claim is already {claim.get('status_name')}")
         
         if not request.reason or len(request.reason.strip()) < 3:
@@ -506,6 +513,12 @@ async def reject_claim(claim_id: int, request: RejectClaimRequest):
         
         # Reject the claim
         approver_id = claim.get('manager_id') or claim.get('employee_id')
+        
+        # Record status change in history
+        await claim_model.record_status_change(
+            claim_id, current_status, 'REJECTED', approver_id, request.reason.strip()
+        )
+        
         updated_claim = await claim_model.reject(claim_id, approver_id, request.reason.strip())
         
         # Notify staff via WhatsApp
@@ -524,6 +537,33 @@ async def reject_claim(claim_id: int, request: RejectClaimRequest):
         raise
     except Exception as e:
         print(f"❌ Error rejecting claim {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claims/{claim_id}/history")
+async def get_claim_history(claim_id: int):
+    """
+    Get status change history for a claim
+    """
+    try:
+        claim = await claim_model.find_by_id(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        history = await claim_model.get_history(claim_id)
+        
+        return {
+            "claim_id": claim_id,
+            "claim_number": claim.get('claim_number'),
+            "current_status": claim.get('status_code'),
+            "appeal_count": claim.get('appeal_count', 0),
+            "history": history
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching claim history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

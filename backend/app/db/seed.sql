@@ -9,7 +9,8 @@ INSERT INTO claim_statuses (code, name, description, display_order) VALUES
 ('PENDING', 'Pending Approval', 'Awaiting manager approval', 2),
 ('APPROVED', 'Approved', 'Claim has been approved', 3),
 ('REJECTED', 'Rejected', 'Claim has been rejected', 4),
-('PAID', 'Paid', 'Claim has been reimbursed', 5)
+('APPEALED', 'Under Appeal', 'Staff has appealed the rejection', 5),
+('PAID', 'Paid', 'Claim has been reimbursed', 6)
 ON CONFLICT (code) DO NOTHING;
 
 -- =============================================

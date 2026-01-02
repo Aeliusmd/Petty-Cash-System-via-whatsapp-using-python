@@ -1,0 +1,516 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+
+interface Employee {
+  id: number;
+  employee_code: string;
+  name: string;
+  phone_number: string;
+  email: string | null;
+  role: string;
+  is_active: boolean;
+  grade_id: number | null;
+  grade_code: string | null;
+  grade_name: string | null;
+  location_id: number | null;
+  location_code: string | null;
+  location_name: string | null;
+  unit_id: number | null;
+  unit_code: string | null;
+  unit_name: string | null;
+  manager_id: number | null;
+  manager_name: string | null;
+}
+
+interface Grade { id: number; code: string; name: string; }
+interface Location { id: number; code: string; name: string; }
+interface Unit { id: number; code: string; name: string; }
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
+
+export default function EmployeesPage() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [grades, setGrades] = useState<Grade[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [includeInactive, setIncludeInactive] = useState(false);
+
+  // Form state
+  const [formData, setFormData] = useState({
+    employee_code: '',
+    name: '',
+    phone_number: '',
+    email: '',
+    grade_id: '',
+    location_id: '',
+    unit_id: '',
+    manager_id: '',
+    role: 'staff',
+  });
+
+  useEffect(() => {
+    fetchEmployees();
+    fetchDropdowns();
+  }, [roleFilter, includeInactive]);
+
+  async function fetchEmployees() {
+    try {
+      setLoading(true);
+      let url = `${API_BASE_URL}/api/employees?include_inactive=${includeInactive}`;
+      if (roleFilter) url += `&role=${roleFilter}`;
+      
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to fetch employees');
+      const data = await res.json();
+      setEmployees(data.employees || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load employees');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchDropdowns() {
+    try {
+      const [gradesRes, locationsRes, unitsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/grades`),
+        fetch(`${API_BASE_URL}/api/locations`),
+        fetch(`${API_BASE_URL}/api/units`),
+      ]);
+      
+      if (gradesRes.ok) {
+        const data = await gradesRes.json();
+        setGrades(data.grades || []);
+      }
+      if (locationsRes.ok) {
+        const data = await locationsRes.json();
+        setLocations(data.locations || []);
+      }
+      if (unitsRes.ok) {
+        const data = await unitsRes.json();
+        setUnits(data.units || []);
+      }
+    } catch (err) {
+      console.error('Error fetching dropdowns:', err);
+    }
+  }
+
+  function openAddModal() {
+    setEditingEmployee(null);
+    setFormData({
+      employee_code: '',
+      name: '',
+      phone_number: '',
+      email: '',
+      grade_id: '',
+      location_id: '',
+      unit_id: '',
+      manager_id: '',
+      role: 'staff',
+    });
+    setShowModal(true);
+  }
+
+  function openEditModal(employee: Employee) {
+    setEditingEmployee(employee);
+    setFormData({
+      employee_code: employee.employee_code,
+      name: employee.name,
+      phone_number: employee.phone_number,
+      email: employee.email || '',
+      grade_id: employee.grade_id?.toString() || '',
+      location_id: employee.location_id?.toString() || '',
+      unit_id: employee.unit_id?.toString() || '',
+      manager_id: employee.manager_id?.toString() || '',
+      role: employee.role,
+    });
+    setShowModal(true);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setProcessing(true);
+
+    try {
+      const payload = {
+        ...formData,
+        grade_id: formData.grade_id ? parseInt(formData.grade_id) : null,
+        location_id: formData.location_id ? parseInt(formData.location_id) : null,
+        unit_id: formData.unit_id ? parseInt(formData.unit_id) : null,
+        manager_id: formData.manager_id ? parseInt(formData.manager_id) : null,
+      };
+
+      const url = editingEmployee 
+        ? `${API_BASE_URL}/api/employees/${editingEmployee.id}`
+        : `${API_BASE_URL}/api/employees`;
+      
+      const res = await fetch(url, {
+        method: editingEmployee ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to save employee');
+      }
+
+      setShowModal(false);
+      fetchEmployees();
+      alert(editingEmployee ? '✅ Employee updated!' : '✅ Employee created!');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save employee');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function handleDelete(employee: Employee) {
+    if (!confirm(`Are you sure you want to deactivate ${employee.name}?`)) return;
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/employees/${employee.id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to delete');
+      }
+      
+      fetchEmployees();
+      alert('✅ Employee deactivated');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete');
+    }
+  }
+
+  const filteredEmployees = employees.filter(e => 
+    e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    e.employee_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    e.phone_number.includes(searchTerm)
+  );
+
+  const managers = employees.filter(e => e.role === 'manager' || e.role === 'admin');
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Employee Management</h2>
+          <p className="text-gray-900">{filteredEmployees.length} employees</p>
+        </div>
+        <button
+          onClick={openAddModal}
+          className="px-4 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          + Add Employee
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 bg-white rounded-xl shadow-md p-4">
+        <input
+          type="text"
+          placeholder="Search by name, code, or phone..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+        />
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="">All Roles</option>
+          <option value="staff">Staff</option>
+          <option value="manager">Manager</option>
+          <option value="admin">Admin</option>
+        </select>
+        <label className="flex items-center gap-2 text-gray-900">
+          <input
+            type="checkbox"
+            checked={includeInactive}
+            onChange={(e) => setIncludeInactive(e.target.checked)}
+            className="rounded"
+          />
+          Show Inactive
+        </label>
+      </div>
+
+      {/* Error State */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-600">
+          {error}
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      ) : (
+        /* Employees Table */
+        <div className="bg-white rounded-xl shadow-md overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Code</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Name</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Phone</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Role</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Grade</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Location</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredEmployees.map((employee) => (
+                <tr key={employee.id} className={`hover:bg-gray-50 ${!employee.is_active ? 'opacity-50' : ''}`}>
+                  <td className="px-4 py-3 font-mono text-sm">{employee.employee_code}</td>
+                  <td className="px-4 py-3 font-medium">{employee.name}</td>
+                  <td className="px-4 py-3 text-gray-900">{employee.phone_number}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      employee.role === 'admin' ? 'bg-purple-100 text-purple-800' :
+                      employee.role === 'manager' ? 'bg-blue-100 text-blue-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {employee.role}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-900">{employee.grade_code || '-'}</td>
+                  <td className="px-4 py-3 text-gray-900">{employee.location_name || '-'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      employee.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {employee.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openEditModal(employee)}
+                        className="px-2 py-1 text-sm text-indigo-600 hover:text-indigo-800"
+                      >
+                        Edit
+                      </button>
+                      {employee.is_active && (
+                        <button
+                          onClick={() => handleDelete(employee)}
+                          className="px-2 py-1 text-sm text-red-600 hover:text-red-800"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filteredEmployees.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-900">
+                    No employees found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">
+                {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
+              </h3>
+              
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    {editingEmployee ? (
+                      <>
+                        <label className="block text-sm font-medium text-gray-900 mb-1">
+                          Employee Code
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.employee_code}
+                          onChange={(e) => setFormData({...formData, employee_code: e.target.value})}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <label className="block text-sm font-medium text-gray-900 mb-1">
+                          Employee Code
+                        </label>
+                        <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 text-sm">
+                          Auto-generated
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData({...formData, name: e.target.value})}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Phone Number *
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.phone_number}
+                      onChange={(e) => setFormData({...formData, phone_number: e.target.value})}
+                      required
+                      placeholder="94771234567"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white placeholder-gray-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({...formData, email: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Role *
+                    </label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({...formData, role: e.target.value})}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                    >
+                      <option value="staff">Staff</option>
+                      <option value="manager">Manager</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Grade
+                    </label>
+                    <select
+                      value={formData.grade_id}
+                      onChange={(e) => setFormData({...formData, grade_id: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                    >
+                      <option value="">Select Grade</option>
+                      {grades.map((g) => (
+                        <option key={g.id} value={g.id}>{g.code} - {g.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Location
+                    </label>
+                    <select
+                      value={formData.location_id}
+                      onChange={(e) => setFormData({...formData, location_id: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                    >
+                      <option value="">Select Location</option>
+                      {locations.map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-1">
+                      Unit
+                    </label>
+                    <select
+                      value={formData.unit_id}
+                      onChange={(e) => setFormData({...formData, unit_id: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                    >
+                      <option value="">Select Unit</option>
+                      {units.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Manager
+                  </label>
+                  <select
+                    value={formData.manager_id}
+                    onChange={(e) => setFormData({...formData, manager_id: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                  >
+                    <option value="">No Manager</option>
+                    {managers.filter(m => m.id !== editingEmployee?.id).map((m) => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    type="submit"
+                    disabled={processing}
+                    className="flex-1 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    {processing ? 'Saving...' : (editingEmployee ? 'Update' : 'Create')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    className="flex-1 py-2 bg-gray-200 text-gray-900 font-medium rounded-lg hover:bg-gray-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -186,6 +186,28 @@ export default function ClaimDetailPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!claim) return;
+    if (!confirm(`Are you sure you want to delete claim ${claim.claim_number}? This action cannot be undone.`)) return;
+    
+    setProcessing(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/claims/${claimId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to delete');
+      }
+      alert('✅ Claim deleted successfully');
+      router.push('/claims');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete claim');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -210,7 +232,7 @@ export default function ClaimDetailPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-500">
+      <div className="flex items-center gap-2 text-sm text-gray-900">
         <Link href="/claims" className="hover:text-indigo-600">Claims</Link>
         <span>/</span>
         <span className="text-gray-800 font-medium">{claim.claim_number}</span>
@@ -224,7 +246,7 @@ export default function ClaimDetailPage() {
               <span className="text-3xl">{getCategoryIcon(claim.category_code)}</span>
               <div>
                 <h1 className="text-2xl font-bold text-gray-800">{claim.claim_number}</h1>
-                <p className="text-gray-500">{claim.category_name} Claim</p>
+                <p className="text-gray-900">{claim.category_name} Claim</p>
               </div>
             </div>
           </div>
@@ -334,15 +356,15 @@ export default function ClaimDetailPage() {
                   <div className="flex items-center gap-2">
                     {item.from_status_name && (
                       <>
-                        <span className="text-gray-500">{item.from_status_name}</span>
+                        <span className="text-gray-900">{item.from_status_name}</span>
                         <span className="text-gray-400">→</span>
                       </>
                     )}
                     <span className="font-medium text-gray-800">{item.to_status_name}</span>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">{formatDate(item.created_at)}</p>
+                  <p className="text-sm text-gray-900 mt-1">{formatDate(item.created_at)}</p>
                   {item.changed_by_name && (
-                    <p className="text-sm text-gray-500">By: {item.changed_by_name}</p>
+                    <p className="text-sm text-gray-900">By: {item.changed_by_name}</p>
                   )}
                   {item.reason && (
                     <p className="text-sm text-gray-600 mt-1 italic">"{item.reason}"</p>
@@ -363,20 +385,20 @@ export default function ClaimDetailPage() {
           </h3>
           <dl className="space-y-3">
             <div className="flex justify-between">
-              <dt className="text-gray-500">Name</dt>
+              <dt className="text-gray-900">Name</dt>
               <dd className="font-medium text-gray-800">{claim.employee_name}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Code</dt>
+              <dt className="text-gray-900">Code</dt>
               <dd className="font-medium text-gray-800">{claim.employee_code}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Grade</dt>
+              <dt className="text-gray-900">Grade</dt>
               <dd className="font-medium text-gray-800">{claim.grade_code || 'N/A'}</dd>
             </div>
             {claim.manager_name && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">Manager</dt>
+                <dt className="text-gray-900">Manager</dt>
                 <dd className="font-medium text-gray-800">{claim.manager_name}</dd>
               </div>
             )}
@@ -390,22 +412,22 @@ export default function ClaimDetailPage() {
           </h3>
           <dl className="space-y-3">
             <div className="flex justify-between">
-              <dt className="text-gray-500">Category</dt>
+              <dt className="text-gray-900">Category</dt>
               <dd className="font-medium text-gray-800">{claim.category_name}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Type</dt>
+              <dt className="text-gray-900">Type</dt>
               <dd className="font-medium text-gray-800 capitalize">{claim.claim_type}</dd>
             </div>
             {claim.location_name && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">Location</dt>
+                <dt className="text-gray-900">Location</dt>
                 <dd className="font-medium text-gray-800">{claim.location_name}</dd>
               </div>
             )}
             {claim.duration_days > 1 && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">Duration</dt>
+                <dt className="text-gray-900">Duration</dt>
                 <dd className="font-medium text-gray-800">{claim.duration_days} days</dd>
               </div>
             )}
@@ -420,13 +442,13 @@ export default function ClaimDetailPage() {
           <dl className="space-y-3">
             {claim.user_amount && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">User Amount</dt>
+                <dt className="text-gray-900">User Amount</dt>
                 <dd className="font-medium text-gray-800">{formatCurrency(claim.user_amount)}</dd>
               </div>
             )}
             {claim.system_amount && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">System Amount</dt>
+                <dt className="text-gray-900">System Amount</dt>
                 <dd className="font-medium text-gray-800">{formatCurrency(claim.system_amount)}</dd>
               </div>
             )}
@@ -446,16 +468,16 @@ export default function ClaimDetailPage() {
           </h3>
           <dl className="space-y-3">
             <div className="flex justify-between">
-              <dt className="text-gray-500">Claim Date</dt>
+              <dt className="text-gray-900">Claim Date</dt>
               <dd className="font-medium text-gray-800">{formatDate(claim.claim_date)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Submitted</dt>
+              <dt className="text-gray-900">Submitted</dt>
               <dd className="font-medium text-gray-800">{formatDate(claim.created_at)}</dd>
             </div>
             {claim.approved_at && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">
+                <dt className="text-gray-900">
                   {claim.status_code === 'APPROVED' ? 'Approved' : 'Processed'}
                 </dt>
                 <dd className="font-medium text-gray-800">{formatDate(claim.approved_at)}</dd>
@@ -463,7 +485,7 @@ export default function ClaimDetailPage() {
             )}
             {claim.approver_name && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">Processed By</dt>
+                <dt className="text-gray-900">Processed By</dt>
                 <dd className="font-medium text-gray-800">{claim.approver_name}</dd>
               </div>
             )}
@@ -481,14 +503,21 @@ export default function ClaimDetailPage() {
         </div>
       )}
 
-      {/* Back Button */}
-      <div className="pt-4">
+      {/* Back Button and Delete */}
+      <div className="pt-4 flex items-center justify-between">
         <Link
           href="/claims"
           className="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-800 font-medium"
         >
           ← Back to Claims
         </Link>
+        <button
+          onClick={handleDelete}
+          disabled={processing}
+          className="px-4 py-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors font-medium"
+        >
+          🗑️ Delete Claim
+        </button>
       </div>
     </div>
   );

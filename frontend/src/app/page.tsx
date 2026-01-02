@@ -77,7 +77,7 @@ export default function Dashboard() {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
         <p className="text-red-600">{error}</p>
-        <p className="text-sm text-gray-500 mt-2">Make sure the backend is running on port 4101</p>
+        <p className="text-sm text-gray-900 mt-2">Make sure the backend is running on port 4101</p>
       </div>
     );
   }
@@ -96,7 +96,7 @@ export default function Dashboard() {
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
-        <p className="text-gray-500">Overview of petty cash claims</p>
+        <p className="text-gray-900">Overview of petty cash claims</p>
       </div>
 
       {/* Stats Cards */}
@@ -104,7 +104,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-indigo-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 uppercase tracking-wide">Total Claims</p>
+              <p className="text-sm text-gray-900 uppercase tracking-wide">Total Claims</p>
               <p className="text-3xl font-bold text-gray-800">{overview.total_claims}</p>
             </div>
             <span className="text-3xl">📋</span>
@@ -115,9 +115,9 @@ export default function Dashboard() {
           <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-yellow-500 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500 uppercase tracking-wide">Pending</p>
+                <p className="text-sm text-gray-900 uppercase tracking-wide">Pending</p>
                 <p className="text-3xl font-bold text-yellow-600">{overview.pending_claims}</p>
-                <p className="text-sm text-gray-400 mt-1">{formatCurrency(overview.pending_amount)}</p>
+                <p className="text-sm text-gray-900 mt-1">{formatCurrency(overview.pending_amount)}</p>
               </div>
               <span className="text-3xl">⏳</span>
             </div>
@@ -127,9 +127,9 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 uppercase tracking-wide">Approved</p>
+              <p className="text-sm text-gray-900 uppercase tracking-wide">Approved</p>
               <p className="text-3xl font-bold text-green-600">{overview.approved_claims}</p>
-              <p className="text-sm text-gray-400 mt-1">{formatCurrency(overview.total_approved_amount)}</p>
+              <p className="text-sm text-gray-900 mt-1">{formatCurrency(overview.total_approved_amount)}</p>
             </div>
             <span className="text-3xl">✅</span>
           </div>
@@ -138,7 +138,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-red-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 uppercase tracking-wide">Rejected</p>
+              <p className="text-sm text-gray-900 uppercase tracking-wide">Rejected</p>
               <p className="text-3xl font-bold text-red-600">{overview.rejected_claims}</p>
             </div>
             <span className="text-3xl">❌</span>
@@ -163,19 +163,19 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-medium text-gray-800">{claim.claim_number}</p>
-                      <p className="text-sm text-gray-500">{claim.employee_name} • {claim.category_name}</p>
+                      <p className="text-sm text-gray-900">{claim.employee_name} • {claim.category_name}</p>
                     </div>
                     <div className="text-right">
                       <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(claim.status_code)}`}>
                         {claim.status_code}
                       </span>
-                      <p className="text-sm font-medium text-gray-700 mt-1">{formatCurrency(claim.final_amount)}</p>
+                      <p className="text-sm font-medium text-gray-900 mt-1">{formatCurrency(claim.final_amount)}</p>
                     </div>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="px-6 py-8 text-center text-gray-500">
+              <div className="px-6 py-8 text-center text-gray-900">
                 No claims yet
               </div>
             )}
@@ -199,14 +199,14 @@ export default function Dashboard() {
                     </span>
                     <div>
                       <p className="font-medium text-gray-800">{cat.category}</p>
-                      <p className="text-sm text-gray-500">{cat.count} claims</p>
+                      <p className="text-sm text-gray-900">{cat.count} claims</p>
                     </div>
                   </div>
                   <p className="font-semibold text-gray-800">{formatCurrency(cat.total_amount)}</p>
                 </div>
               ))
             ) : (
-              <div className="px-6 py-8 text-center text-gray-500">
+              <div className="px-6 py-8 text-center text-gray-900">
                 No approved claims yet
               </div>
             )}

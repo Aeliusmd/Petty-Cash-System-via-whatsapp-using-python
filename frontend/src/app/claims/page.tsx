@@ -22,6 +22,7 @@ interface Claim {
   final_amount: number | null;
   description: string | null;
   rejection_reason: string | null;
+  appeal_count: number | null;
   created_at: string;
 }
 
@@ -82,7 +83,9 @@ function ClaimsContent() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (activeStatus) params.set('status', activeStatus);
+      if (activeStatus) {
+        params.set('status', activeStatus);
+      }
       
       const res = await fetch(`${API_BASE_URL}/api/claims?${params}`);
       if (!res.ok) throw new Error('Failed to fetch claims');
@@ -146,7 +149,36 @@ function ClaimsContent() {
     }
   }
 
+  async function handleDelete(claimId: number, claimNumber: string) {
+    if (!confirm(`Are you sure you want to delete claim ${claimNumber}? This action cannot be undone.`)) return;
+    
+    setProcessing(claimId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/claims/${claimId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to delete');
+      }
+      await fetchClaims();
+      alert('✅ Claim deleted successfully');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete claim');
+    } finally {
+      setProcessing(null);
+    }
+  }
+
   const statuses = ['', 'PENDING', 'APPEALED', 'APPROVED', 'REJECTED'];
+
+  // Get display name for status, showing "Appeal & Approved" for claims that went through appeal
+  const getClaimStatusDisplay = (claim: Claim) => {
+    if (claim.status_code === 'APPROVED' && claim.appeal_count && claim.appeal_count > 0) {
+      return 'Appeal & Approved';
+    }
+    return claim.status_name;
+  };
 
   return (
     <div className="space-y-6">
@@ -154,7 +186,7 @@ function ClaimsContent() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Claims</h2>
-          <p className="text-gray-500">{total} total claims</p>
+          <p className="text-gray-900">{total} total claims</p>
         </div>
       </div>
 
@@ -167,7 +199,7 @@ function ClaimsContent() {
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeStatus === status
                 ? 'bg-indigo-600 text-white'
-                : 'text-gray-600 hover:bg-gray-100'
+                : 'text-gray-900 hover:bg-gray-100'
             }`}
           >
             {status || 'All'}
@@ -193,20 +225,20 @@ function ClaimsContent() {
       {!loading && !error && (
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
           {claims.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
+            <div className="p-8 text-center text-gray-900">
               No claims found
             </div>
           ) : (
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Claim #</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Claim #</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Employee</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Category</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Amount</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Date</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -219,7 +251,7 @@ function ClaimsContent() {
                     </td>
                     <td className="px-6 py-4">
                       <p className="font-medium text-gray-800">{claim.employee_name}</p>
-                      <p className="text-sm text-gray-500">{claim.employee_code}</p>
+                      <p className="text-sm text-gray-900">{claim.employee_code}</p>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -227,7 +259,7 @@ function ClaimsContent() {
                         <span>{claim.category_name}</span>
                       </div>
                       {claim.location_name && (
-                        <p className="text-sm text-gray-500">📍 {claim.location_name}</p>
+                        <p className="text-sm text-gray-900">📍 {claim.location_name}</p>
                       )}
                     </td>
                     <td className="px-6 py-4 font-medium">
@@ -235,10 +267,10 @@ function ClaimsContent() {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(claim.status_code)}`}>
-                        {claim.status_name}
+                        {getClaimStatusDisplay(claim)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
+                    <td className="px-6 py-4 text-sm text-gray-900">
                       {formatDate(claim.created_at)}
                     </td>
                     <td className="px-6 py-4">
@@ -279,7 +311,7 @@ function ClaimsContent() {
                           </button>
                           <button
                             onClick={() => { setRejectingId(null); setRejectReason(''); }}
-                            className="px-2 py-1 bg-gray-200 text-gray-700 text-xs font-medium rounded hover:bg-gray-300"
+                            className="px-2 py-1 bg-gray-200 text-gray-900 text-xs font-medium rounded hover:bg-gray-300"
                           >
                             ✕
                           </button>
@@ -288,6 +320,14 @@ function ClaimsContent() {
                       {claim.status_code === 'REJECTED' && claim.rejection_reason && (
                         <p className="text-sm text-red-600">Reason: {claim.rejection_reason}</p>
                       )}
+                      {/* Delete Button - always visible */}
+                      <button
+                        onClick={() => handleDelete(claim.id, claim.claim_number)}
+                        disabled={processing === claim.id}
+                        className="mt-2 px-2 py-1 text-xs text-red-500 hover:text-red-700 hover:underline"
+                      >
+                        🗑️ Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

@@ -229,3 +229,17 @@ async def find_latest_rejected_for_employee(employee_id: int) -> Optional[dict]:
     """, employee_id)
     
     return result[0] if result else None
+
+
+async def delete(claim_id: int) -> bool:
+    """Delete a claim and its related data"""
+    # First delete status history
+    await db.query("DELETE FROM claim_status_history WHERE claim_id = $1", claim_id)
+    
+    # Delete claim comments if any
+    await db.query("DELETE FROM claim_comments WHERE claim_id = $1", claim_id)
+    
+    # Delete the claim
+    result = await db.query("DELETE FROM claims WHERE id = $1 RETURNING id", claim_id)
+    
+    return len(result) > 0

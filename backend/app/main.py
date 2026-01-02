@@ -351,6 +351,7 @@ async def get_claims(
     status: Optional[str] = Query(None, description="Filter by status: PENDING, APPROVED, REJECTED"),
     employee_id: Optional[int] = Query(None, description="Filter by employee ID"),
     manager_id: Optional[int] = Query(None, description="Filter by manager ID"),
+    appealed: Optional[bool] = Query(None, description="Filter by claims that went through appeal process"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
@@ -383,6 +384,12 @@ async def get_claims(
             query += f" AND s.code = ${param_index}"
             params.append(status.upper())
             param_index += 1
+        
+        # Filter by claims that went through appeal process
+        if appealed is True:
+            query += " AND COALESCE(c.appeal_count, 0) > 0"
+        elif appealed is False:
+            query += " AND COALESCE(c.appeal_count, 0) = 0"
             
         if employee_id:
             query += f" AND c.employee_id = ${param_index}"
@@ -628,17 +635,199 @@ async def get_stats():
 
 
 @app.get("/api/employees")
-async def get_employees(role: Optional[str] = Query(None)):
+async def get_employees(
+    role: Optional[str] = Query(None),
+    location_id: Optional[int] = Query(None),
+    include_inactive: bool = Query(False)
+):
     """
-    Get list of employees (for dropdowns, etc.)
+    Get list of employees with optional filters
     """
     try:
-        employees = await employee_model.find_all()
-        if role:
-            employees = [e for e in employees if e.get('role') == role]
-        return {"employees": employees}
+        employees = await employee_model.find_all_with_details(
+            role=role, 
+            location_id=location_id, 
+            include_inactive=include_inactive
+        )
+        return {"employees": employees, "total": len(employees)}
     except Exception as e:
         print(f"❌ Error fetching employees: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/employees/{employee_id}")
+async def get_employee(employee_id: int):
+    """
+    Get a single employee by ID
+    """
+    try:
+        employee = await employee_model.find_by_id(employee_id)
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        return employee
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching employee {employee_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CreateEmployeeRequest(BaseModel):
+    employee_code: Optional[str] = None  # Auto-generated if not provided
+    name: str
+    phone_number: str
+    email: Optional[str] = None
+    grade_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    location_id: Optional[int] = None
+    manager_id: Optional[int] = None
+    role: str = "staff"
+
+
+@app.post("/api/employees")
+async def create_employee(request: CreateEmployeeRequest):
+    """
+    Create a new employee
+    """
+    try:
+        employee = await employee_model.create(request.model_dump())
+        return {
+            "success": True,
+            "message": "Employee created successfully",
+            "employee": employee
+        }
+    except Exception as e:
+        print(f"❌ Error creating employee: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpdateEmployeeRequest(BaseModel):
+    employee_code: Optional[str] = None
+    name: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[str] = None
+    grade_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    location_id: Optional[int] = None
+    manager_id: Optional[int] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@app.put("/api/employees/{employee_id}")
+async def update_employee(employee_id: int, request: UpdateEmployeeRequest):
+    """
+    Update an employee
+    """
+    try:
+        existing = await employee_model.find_by_id(employee_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        employee = await employee_model.update(employee_id, request.model_dump(exclude_unset=True))
+        if not employee:
+            raise HTTPException(status_code=500, detail="Failed to update employee")
+        
+        return {
+            "success": True,
+            "message": "Employee updated successfully",
+            "employee": employee
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating employee {employee_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/employees/{employee_id}")
+async def delete_employee(employee_id: int, permanent: bool = Query(False)):
+    """
+    Delete an employee (soft delete by default, permanent if specified)
+    """
+    try:
+        existing = await employee_model.find_by_id(employee_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        if permanent:
+            success = await employee_model.hard_delete(employee_id)
+        else:
+            success = await employee_model.delete(employee_id)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete employee")
+        
+        return {
+            "success": True,
+            "message": "Employee deleted permanently" if permanent else "Employee deactivated",
+            "id": employee_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting employee {employee_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/claims/{claim_id}")
+async def delete_claim(claim_id: int):
+    """
+    Delete a claim and its related data
+    """
+    try:
+        existing = await claim_model.find_by_id(claim_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        success = await claim_model.delete(claim_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete claim")
+        
+        return {
+            "success": True,
+            "message": "Claim deleted successfully",
+            "id": claim_id,
+            "claim_number": existing.get('claim_number')
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting claim {claim_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Helper endpoints for form dropdowns
+@app.get("/api/grades")
+async def get_grades():
+    """Get all grades for dropdowns"""
+    try:
+        from app.db import db
+        grades = await db.query("SELECT * FROM grades ORDER BY display_order")
+        return {"grades": grades}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/locations")
+async def get_locations():
+    """Get all locations for dropdowns"""
+    try:
+        from app.db import db
+        locations = await db.query("SELECT * FROM locations WHERE is_active = TRUE ORDER BY name")
+        return {"locations": locations}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/units")
+async def get_units():
+    """Get all units for dropdowns"""
+    try:
+        from app.db import db
+        units = await db.query("SELECT * FROM units ORDER BY name")
+        return {"units": units}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -646,3 +835,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv('PORT', '4101'))
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)
+

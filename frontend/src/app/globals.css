@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #111827;
+  --foreground: #f3f4f6;
 }
 
 @theme inline {
@@ -14,8 +14,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #111827;
+    --foreground: #f3f4f6;
   }
 }
 
@@ -23,4 +23,357 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ===== MODERN ANIMATIONS & EFFECTS ===== */
+
+/* Smooth transitions for everything */
+*, *::before, *::after {
+  transition: all 0.2s ease-in-out;
+}
+
+/* ===== BUTTONS ===== */
+button {
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+button:active {
+  transform: translateY(0);
+  box-shadow: 0 5px 15px -5px rgba(0, 0, 0, 0.2);
+}
+
+/* Primary buttons (indigo) - glowing effect */
+button.bg-indigo-600,
+.bg-indigo-600 {
+  position: relative;
+  overflow: hidden;
+}
+
+button.bg-indigo-600:hover,
+.bg-indigo-600:hover {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+}
+
+/* Ripple effect on click */
+button:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.4);
+}
+
+/* ===== LINKS ===== */
+a {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+a:hover {
+  opacity: 0.9;
+}
+
+/* ===== CARDS & PANELS - FORCE BLACK TEXT ===== */
+.bg-white {
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.bg-white:hover {
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
+}
+
+/* FORCE ALL TEXT INSIDE WHITE CARDS TO BE ABSOLUTE BLACK */
+.bg-white,
+.bg-white *,
+.bg-white p,
+.bg-white span,
+.bg-white div,
+.bg-white h1,
+.bg-white h2,
+.bg-white h3,
+.bg-white h4,
+.bg-white h5,
+.bg-white h6,
+.bg-white td,
+.bg-white th,
+.bg-white li,
+.bg-white a,
+.bg-white label,
+.bg-white dt,
+.bg-white dd,
+.bg-white .text-gray-300,
+.bg-white .text-gray-400,
+.bg-white .text-gray-500,
+.bg-white .text-gray-600,
+.bg-white .text-gray-700,
+.bg-white .text-gray-800,
+.bg-white .text-gray-900,
+.bg-white .text-xs,
+.bg-white .text-sm,
+.bg-white .text-base,
+.bg-white .text-lg,
+.bg-white .text-xl,
+.bg-white .text-2xl,
+.bg-white .font-medium,
+.bg-white .font-semibold,
+.bg-white .font-bold {
+  color: #000000 !important; /* ABSOLUTE BLACK */
+}
+
+/* Card entrance animation */
+.rounded-xl {
+  animation: fadeSlideIn 0.4s ease-out;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== TABLE ROWS ===== */
+table tr {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+table tbody tr:hover {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%) !important;
+  transform: scale(1.01);
+}
+
+table td, table th, table span, table p, table div {
+  color: #000000 !important;
+}
+
+/* ===== STATUS BADGES - Keep their colors ===== */
+.rounded-full {
+  transition: all 0.3s ease;
+}
+
+.rounded-full:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Badge pulse animation for pending status */
+.bg-yellow-100 {
+  animation: gentlePulse 2s infinite;
+}
+
+@keyframes gentlePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+/* Badge text colors - override with specific badge colors */
+.bg-green-100, .bg-green-100 * { color: #166534 !important; }
+.bg-red-100, .bg-red-100 * { color: #991b1b !important; }
+.bg-blue-100, .bg-blue-100 * { color: #1e40af !important; }
+.bg-purple-100, .bg-purple-100 * { color: #6b21a8 !important; }
+.bg-yellow-100, .bg-yellow-100 * { color: #854d0e !important; }
+.bg-gray-100, .bg-gray-100 * { color: #000000 !important; }
+
+/* ===== FORM INPUTS ===== */
+input, select, textarea {
+  color: #000000 !important;
+  background-color: white !important;
+  cursor: text;
+  transition: all 0.3s ease;
+  border-color: #d1d5db; /* gray-300 */
+}
+
+input:focus, select:focus, textarea:focus {
+  transform: scale(1.02);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3), 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  border-color: #6366f1 !important;
+}
+
+select {
+  cursor: pointer;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #6b7280 !important; /* gray-500 for placeholders only */
+  opacity: 1;
+}
+
+option {
+  color: #000000 !important;
+  background: white !important;
+}
+
+/* ===== FILTER TABS ===== */
+.rounded-xl.shadow-md button {
+  color: #000000 !important;
+  cursor: pointer;
+}
+
+.rounded-xl.shadow-md button:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5 !important;
+}
+
+.rounded-xl.shadow-md button.bg-indigo-600 {
+  color: white !important;
+}
+
+/* ===== PAGE TITLES (on dark background) ===== */
+h2.text-2xl,
+.text-2xl,
+body > div > main > div > div:first-child h2,
+body > div > main > div > div:first-child .text-2xl {
+  color: #f9fafb !important;
+}
+
+/* Subtitle on dark background */
+body > div > main > div > div:first-child p,
+body > div > main > div > div:first-child .text-gray-900,
+body > div > main > div > div:first-child .text-gray-500 {
+  color: #d1d5db !important;
+}
+
+/* ===== ACTION BUTTONS (Edit/Delete) ===== */
+.bg-white .text-indigo-600,
+.bg-white a.text-indigo-600 {
+  color: #4f46e5 !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bg-white .text-indigo-600:hover,
+.bg-white a.text-indigo-600:hover {
+  color: #3730a3 !important;
+  text-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+
+.bg-white .text-red-600,
+.bg-white .text-red-500 {
+  color: #dc2626 !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bg-white .text-red-600:hover,
+.bg-white .text-red-500:hover {
+  color: #b91c1c !important;
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+/* ===== MODALS ===== */
+.fixed.inset-0 {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fixed.inset-0 > div {
+  animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ===== HEADER & NAV ===== */
+header, header *, nav, nav * {
+  color: white !important;
+}
+
+nav a {
+  position: relative;
+  padding-bottom: 4px;
+}
+
+nav a::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 2px;
+  bottom: 0;
+  left: 50%;
+  background: white;
+  transition: all 0.3s ease;
+  transform: translateX(-50%);
+}
+
+nav a:hover::after {
+  width: 100%;
+}
+
+nav a:hover {
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+}
+
+/* ===== LOADING SPINNER ===== */
+.animate-spin {
+  animation: spin 1s linear infinite, glow 2s ease-in-out infinite;
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(99, 102, 241, 0.5); }
+  50% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.8); }
+}
+
+/* ===== GRAY BACKGROUNDS ===== */
+/* Force gray backgrounds to have BLACK text */
+.bg-gray-50 {
+  background-color: #f9fafb !important;
+}
+
+.bg-gray-50,
+.bg-gray-50 * {
+  color: #000000 !important;
+}
+
+/* Clickable items cursor */
+[onclick], [role="button"], .cursor-pointer {
+  cursor: pointer;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(99, 102, 241, 0.3);
+  color: white;
 }

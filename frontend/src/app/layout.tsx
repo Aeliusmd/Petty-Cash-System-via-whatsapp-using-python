@@ -26,7 +26,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-900 text-gray-100`}
       >
         <div className="min-h-screen">
           {/* Header */}
@@ -43,6 +43,9 @@ export default function RootLayout({
                   </Link>
                   <Link href="/claims" className="hover:text-indigo-200 transition-colors font-medium">
                     Claims
+                  </Link>
+                  <Link href="/employees" className="hover:text-indigo-200 transition-colors font-medium">
+                    Employees
                   </Link>
                 </nav>
               </div>

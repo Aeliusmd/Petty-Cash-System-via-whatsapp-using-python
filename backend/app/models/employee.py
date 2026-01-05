@@ -7,10 +7,54 @@ from typing import Optional
 from app.db.database import db
 
 
-async def find_by_phone(phone_number: str) -> Optional[dict]:
-    """Find employee by phone number"""
-    normalized = re.sub(r'[\s+\-]', '', phone_number)
+def normalize_phone_for_matching(phone: str) -> str:
+    """
+    Normalize phone number for consistent matching.
+    Handles Sri Lankan phone formats:
+    - +94771234567 -> 771234567 (international with +)
+    - 94771234567  -> 771234567 (international without +)
+    - 0771234567   -> 771234567 (local with leading 0)
+    - 771234567    -> 771234567 (already normalized)
+    """
+    if not phone:
+        return ''
+    # Remove all non-digit characters
+    digits = re.sub(r'\D', '', phone)
     
+    # Handle Sri Lankan country code (94)
+    if digits.startswith('94') and len(digits) >= 11:
+        # Remove country code (94)
+        digits = digits[2:]
+    
+    # Remove leading 0 if present
+    if digits.startswith('0') and len(digits) >= 10:
+        digits = digits[1:]
+    
+    return digits
+
+
+async def find_by_phone(phone_number: str) -> Optional[dict]:
+    """
+    Find employee by phone number.
+    Handles various phone number formats:
+    - 94771234567 (from WhatsApp)
+    - 0771234567 (local Sri Lankan)
+    - +94771234567
+    - 771234567
+    """
+    # Normalize incoming phone number
+    normalized = normalize_phone_for_matching(phone_number)
+    
+    if not normalized:
+        return None
+    
+    print(f"🔍 Phone lookup: original='{phone_number}' -> normalized='{normalized}'")
+    
+    # Use multiple patterns for flexible matching:
+    # 1. Match the full normalized number anywhere
+    # 2. Match with 94 prefix
+    # 3. Match with 0 prefix
+    # 4. Match last 9 digits (the core number without any prefix)
     result = await db.query("""
         SELECT e.*, g.code as grade_code, g.name as grade_name,
                u.code as unit_code, u.name as unit_name,
@@ -21,9 +65,21 @@ async def find_by_phone(phone_number: str) -> Optional[dict]:
         LEFT JOIN units u ON e.unit_id = u.id
         LEFT JOIN locations l ON e.location_id = l.id
         LEFT JOIN employees m ON e.manager_id = m.id
-        WHERE (e.phone_number LIKE $1 OR e.phone_number LIKE $2)
+        WHERE (
+            -- Match normalized phone directly
+            REGEXP_REPLACE(e.phone_number, '[^0-9]', '', 'g') LIKE '%' || $1
+            -- Or match with country code prepended
+            OR REGEXP_REPLACE(e.phone_number, '[^0-9]', '', 'g') LIKE '%94' || $1
+            -- Or match without leading 0
+            OR REGEXP_REPLACE(e.phone_number, '[^0-9]', '', 'g') LIKE '%0' || $1
+        )
         AND e.is_active = TRUE
-    """, f"%{normalized}", f"%{normalized[-10:]}")
+    """, normalized)
+    
+    if result:
+        print(f"✅ Found employee: {result[0].get('name')}")
+    else:
+        print(f"⚠️ No employee found for phone: {normalized}")
     
     return result[0] if result else None
 
@@ -143,7 +199,39 @@ async def delete(employee_id: int) -> bool:
 
 
 async def hard_delete(employee_id: int) -> bool:
-    """Permanently delete employee (use with caution)"""
+    """
+    Permanently delete employee and their associated data (use with caution)
+    This will also delete all claims associated with the employee.
+    """
+    # First, delete associated claim status history
+    await db.execute("""
+        DELETE FROM claim_status_history 
+        WHERE claim_id IN (SELECT id FROM claims WHERE employee_id = $1)
+    """, employee_id)
+    
+    # Delete associated claim receipts
+    await db.execute("""
+        DELETE FROM claim_receipts 
+        WHERE claim_id IN (SELECT id FROM claims WHERE employee_id = $1)
+    """, employee_id)
+    
+    # Delete associated claim comments
+    await db.execute("""
+        DELETE FROM claim_comments 
+        WHERE claim_id IN (SELECT id FROM claims WHERE employee_id = $1)
+    """, employee_id)
+    
+    # Delete associated conversation states
+    await db.execute("""
+        DELETE FROM conversation_states WHERE employee_id = $1
+    """, employee_id)
+    
+    # Delete associated claims
+    await db.execute("""
+        DELETE FROM claims WHERE employee_id = $1
+    """, employee_id)
+    
+    # Finally, delete the employee
     result = await db.query("""
         DELETE FROM employees WHERE id = $1 RETURNING id
     """, employee_id)

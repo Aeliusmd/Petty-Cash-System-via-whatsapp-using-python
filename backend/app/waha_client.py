@@ -124,3 +124,29 @@ async def get_session_status() -> dict:
     except Exception as e:
         print(f'❌ WAHA getSessionStatus error: {e}')
         raise
+
+
+async def get_lid_info(lid: str) -> Optional[dict]:
+    """
+    Get LID info to resolve to phone number
+    
+    Args:
+        lid: The Linked ID (e.g. 12345@lid)
+        
+    Returns:
+        Dict with 'lid' and 'pn' (phone number) or None if failed
+    """
+    try:
+        # URL encode the LID (replace @ with %40)
+        encoded_lid = lid.replace('@', '%40')
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f'{WAHA_BASE_URL}/api/{WAHA_SESSION}/lids/{encoded_lid}',
+                headers=_get_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        print(f'⚠️ WAHA get_lid_info failed for {lid}: {e}')
+        return None

@@ -134,7 +134,11 @@ async def process_message(correlation_id: str, payload: dict, session: str):
     Background task to process incoming WhatsApp message
     """
     try:
-        # DEBUG: Log payload structure to understand WAHA format
+        # DEBUG: Log complete payload structure to understand WAHA format
+        import json
+        print(f'[{correlation_id}] 🔍 DEBUG: Full payload structure:')
+        print(f'[{correlation_id}] {json.dumps(payload, indent=2, default=str)[:2000]}')
+        
         print(f'[{correlation_id}] 🔍 DEBUG: Payload keys: {list(payload.keys())}')
         print(f'[{correlation_id}] 🔍 DEBUG: body={payload.get("body")}, text={payload.get("text")}, type={payload.get("type")}')
         
@@ -153,9 +157,32 @@ async def process_message(correlation_id: str, payload: dict, session: str):
             ''
         )
 
-        # Extract chat ID
-        chat_id = (payload.get('chatId') or payload.get('chat_id') or 
-                   payload.get('from') or payload.get('remoteJid'))
+        # Extract chat ID - try multiple possible fields
+        # WAHA may use different formats: phone@c.us, lid@lid, etc.
+        chat_id = (
+            payload.get('chatId') or 
+            payload.get('chat_id') or 
+            payload.get('from') or 
+            payload.get('remoteJid') or
+            payload.get('_data', {}).get('from') or
+            payload.get('_data', {}).get('chatId')
+        )
+        
+        # DEBUG: Log all potential phone number sources
+        print(f'[{correlation_id}] 🔍 DEBUG: chatId={chat_id}')
+        print(f'[{correlation_id}] 🔍 DEBUG: from={payload.get("from")}')
+        print(f'[{correlation_id}] 🔍 DEBUG: _data.from={payload.get("_data", {}).get("from")}')
+        print(f'[{correlation_id}] 🔍 DEBUG: notifyName={payload.get("notifyName")}')
+        
+        # Check for phone number in sender/participant fields (for LID format)
+        sender = payload.get('sender') or payload.get('_data', {}).get('sender') or {}
+        if isinstance(sender, dict):
+            print(f'[{correlation_id}] 🔍 DEBUG: sender={sender}')
+            # sender might contain: {id: "phone@c.us", pushname: "Name"}
+            sender_id = sender.get('id') or sender.get('_serialized')
+            if sender_id and '@c.us' in str(sender_id):
+                print(f'[{correlation_id}] 📱 Found phone in sender: {sender_id}')
+                chat_id = sender_id
 
         if not chat_id:
             print(f'[{correlation_id}] ⚠️ No chatId found in payload')
@@ -770,6 +797,42 @@ async def delete_employee(employee_id: int, permanent: bool = Query(False)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/employees/cleanup/inactive")
+async def delete_inactive_employees():
+    """
+    Delete all inactive employees from the database permanently
+    """
+    try:
+        from app.db import db
+        
+        # First get the list of inactive employees
+        inactive = await db.query("SELECT id, name FROM employees WHERE is_active = FALSE")
+        
+        if not inactive:
+            return {
+                "success": True,
+                "message": "No inactive employees found",
+                "deleted_count": 0,
+                "deleted_employees": []
+            }
+        
+        # Delete all inactive employees
+        await db.execute("DELETE FROM employees WHERE is_active = FALSE")
+        
+        deleted_names = [e['name'] for e in inactive]
+        print(f"🗑️ Deleted {len(inactive)} inactive employees: {deleted_names}")
+        
+        return {
+            "success": True,
+            "message": f"Deleted {len(inactive)} inactive employees",
+            "deleted_count": len(inactive),
+            "deleted_employees": deleted_names
+        }
+    except Exception as e:
+        print(f"❌ Error deleting inactive employees: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/claims/{claim_id}")
 async def delete_claim(claim_id: int):
     """
@@ -803,7 +866,7 @@ async def get_grades():
     """Get all grades for dropdowns"""
     try:
         from app.db import db
-        grades = await db.query("SELECT * FROM grades ORDER BY display_order")
+        grades = await db.query("SELECT * FROM grades ORDER BY code")
         return {"grades": grades}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -17,6 +17,7 @@ from app.models import rates as rates_model
 from app.models import claim as claim_model
 from app.models import conversation as conversation_model
 from app.services.location_service import location_service
+from app import waha_client
 
 
 def normalize_text(text: str) -> str:
@@ -24,15 +25,37 @@ def normalize_text(text: str) -> str:
     return (text or '').lower().strip()
 
 
+def is_lid_format(chat_id: str) -> bool:
+    """Check if chat ID is in Linked ID format (unsaved contact)"""
+    return chat_id and '@lid' in chat_id.lower()
+
+
 def extract_phone_from_chat_id(chat_id: str) -> Optional[str]:
     """
     Extract phone number from chat ID
     Chat IDs are typically in format: 94771234567@c.us
+    
+    For LID (Linked ID) format like 29545113604243@lid_xxx, returns None
+    because the number is not a valid phone number - it's a WhatsApp internal ID.
     """
     if not chat_id:
         return None
-    # Remove @c.us, @s.whatsapp.net, etc.
-    return re.sub(r'\D', '', chat_id.split('@')[0])
+    
+    # LID format doesn't contain real phone numbers
+    if is_lid_format(chat_id):
+        print(f"⚠️ LID format detected: {chat_id[:30]}... - this is an unsaved contact")
+        return None
+    
+    # Extract just the number part before @
+    number_part = chat_id.split('@')[0]
+    phone = re.sub(r'\D', '', number_part)
+    
+    # Validate it looks like a phone number (9-15 digits for international numbers)
+    if len(phone) < 9 or len(phone) > 15:
+        print(f"⚠️ Invalid phone number length ({len(phone)} digits): {phone}")
+        return None
+    
+    return phone
 
 
 def is_group_chat(chat_id: str) -> bool:
@@ -88,21 +111,36 @@ async def generate_reply(message_text: str, chat_id: str) -> Optional[str]:
         return None
 
     # 2. Extract phone number from chat ID
-    phone_number = extract_phone_from_chat_id(chat_id)
+    phone_number = None
+    
+    # Check for LID format (unsaved contact in WhatsApp)
+    if is_lid_format(chat_id):
+        print(f'🔍 LID format detected ({chat_id[:30]}...), attempting to resolve to phone via WAHA API...')
+        lid_info = await waha_client.get_lid_info(chat_id)
+        if lid_info and lid_info.get('pn'):
+            phone_number = str(lid_info.get('pn'))
+            print(f"✅ Resolved LID {chat_id[:15]}... to phone: {phone_number}")
+        else:
+            print(f"⚠️ Failed to resolve LID {chat_id[:30]}...")
+    else:
+        # Standard format
+        phone_number = extract_phone_from_chat_id(chat_id)
+    
+    # 3. If can't extract phone, silently ignore (no error message)
     if not phone_number:
-        print(f'⚠️ Could not extract phone from chatId: {chat_id}')
+        print(f'⏭️ Could not extract valid phone from chatId: {chat_id[:50]}... - silently ignoring')
         return None
 
-    # 3. Check if this phone number is registered in the database
+    # 4. Check if this phone number is registered in the database
     employee = await employee_model.find_by_phone(phone_number)
     
     # Also try to find by chat ID if phone lookup fails
     if not employee:
         employee = await employee_model.find_by_chat_id(chat_id)
 
-    # 4. If not registered, don't respond
+    # 5. If not registered, silently ignore (no response)
     if not employee:
-        print(f'⏭️ Unregistered number, ignoring: {phone_number}')
+        print(f'⏭️ Unregistered number, silently ignoring: {phone_number}')
         return None
 
     # 5. Link chat ID to employee if not already linked

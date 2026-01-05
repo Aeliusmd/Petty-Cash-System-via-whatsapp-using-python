@@ -44,6 +44,10 @@ export default function EmployeesPage() {
   const [roleFilter, setRoleFilter] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
   // Form state
   const [formData, setFormData] = useState({
     employee_code: '',
@@ -175,10 +179,11 @@ export default function EmployeesPage() {
   }
 
   async function handleDelete(employee: Employee) {
-    if (!confirm(`Are you sure you want to deactivate ${employee.name}?`)) return;
+    if (!confirm(`Are you sure you want to permanently delete ${employee.name}? This action cannot be undone.`)) return;
     
     try {
-      const res = await fetch(`${API_BASE_URL}/api/employees/${employee.id}`, {
+      // Use permanent=true to delete from database instead of soft delete
+      const res = await fetch(`${API_BASE_URL}/api/employees/${employee.id}?permanent=true`, {
         method: 'DELETE',
       });
       
@@ -188,7 +193,7 @@ export default function EmployeesPage() {
       }
       
       fetchEmployees();
-      alert('✅ Employee deactivated');
+      alert('✅ Employee permanently deleted');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete');
     }
@@ -200,6 +205,14 @@ export default function EmployeesPage() {
     e.phone_number.includes(searchTerm)
   );
 
+  // Paginate filtered employees
+  const totalEmployees = filteredEmployees.length;
+  const totalPages = Math.ceil(totalEmployees / itemsPerPage);
+  const paginatedEmployees = filteredEmployees.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const managers = employees.filter(e => e.role === 'manager' || e.role === 'admin');
 
   return (
@@ -208,7 +221,7 @@ export default function EmployeesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Employee Management</h2>
-          <p className="text-gray-900">{filteredEmployees.length} employees</p>
+          <p className="text-gray-900">{totalEmployees} employees</p>
         </div>
         <button
           onClick={openAddModal}
@@ -224,12 +237,12 @@ export default function EmployeesPage() {
           type="text"
           placeholder="Search by name, code, or phone..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
           className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
         />
         <select
           value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
+          onChange={(e) => { setRoleFilter(e.target.value); setCurrentPage(1); }}
           className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
         >
           <option value="">All Roles</option>
@@ -277,7 +290,7 @@ export default function EmployeesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredEmployees.map((employee) => (
+              {paginatedEmployees.map((employee) => (
                 <tr key={employee.id} className={`hover:bg-gray-50 ${!employee.is_active ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3 font-mono text-sm">{employee.employee_code}</td>
                   <td className="px-4 py-3 font-medium">{employee.name}</td>
@@ -320,7 +333,7 @@ export default function EmployeesPage() {
                   </td>
                 </tr>
               ))}
-              {filteredEmployees.length === 0 && (
+              {paginatedEmployees.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-8 text-center text-gray-900">
                     No employees found
@@ -329,6 +342,46 @@ export default function EmployeesPage() {
               )}
             </tbody>
           </table>
+          
+          {/* Pagination Controls */}
+          {totalEmployees > 0 && (
+            <div className="px-4 py-4 bg-gray-50 border-t flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-700">
+                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalEmployees)} of {totalEmployees} employees
+                </span>
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                >
+                  <option value={5}>5 per page</option>
+                  <option value={10}>10 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ← Previous
+                </button>
+                <span className="px-3 py-1 text-sm">
+                  Page {currentPage} of {totalPages || 1}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

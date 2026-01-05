@@ -71,13 +71,17 @@ function ClaimsContent() {
   const [error, setError] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState(statusFilter);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [processing, setProcessing] = useState<number | null>(null);
 
   useEffect(() => {
     fetchClaims();
-  }, [activeStatus]);
+  }, [activeStatus, currentPage, itemsPerPage]);
 
   async function fetchClaims() {
     setLoading(true);
@@ -86,6 +90,9 @@ function ClaimsContent() {
       if (activeStatus) {
         params.set('status', activeStatus);
       }
+      // Add pagination params
+      params.set('limit', itemsPerPage.toString());
+      params.set('offset', ((currentPage - 1) * itemsPerPage).toString());
       
       const res = await fetch(`${API_BASE_URL}/api/claims?${params}`);
       if (!res.ok) throw new Error('Failed to fetch claims');
@@ -195,7 +202,7 @@ function ClaimsContent() {
         {statuses.map((status) => (
           <button
             key={status || 'all'}
-            onClick={() => setActiveStatus(status)}
+            onClick={() => { setActiveStatus(status); setCurrentPage(1); }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeStatus === status
                 ? 'bg-indigo-600 text-white'
@@ -333,6 +340,46 @@ function ClaimsContent() {
                 ))}
               </tbody>
             </table>
+          )}
+          
+          {/* Pagination Controls */}
+          {claims.length > 0 && (
+            <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-700">
+                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, total)} of {total} claims
+                </span>
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                >
+                  <option value={5}>5 per page</option>
+                  <option value={10}>10 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ← Previous
+                </button>
+                <span className="px-3 py-1 text-sm">
+                  Page {currentPage} of {Math.ceil(total / itemsPerPage) || 1}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(Math.ceil(total / itemsPerPage), p + 1))}
+                  disabled={currentPage >= Math.ceil(total / itemsPerPage)}
+                  className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

@@ -26,6 +26,12 @@ interface Claim {
   created_at: string;
 }
 
+interface Employee {
+  id: number;
+  name: string;
+  employee_code: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 function formatCurrency(amount: number | null): string {
@@ -66,10 +72,12 @@ function ClaimsContent() {
   const statusFilter = searchParams.get('status') || '';
   
   const [claims, setClaims] = useState<Claim[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState(statusFilter);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -78,10 +86,38 @@ function ClaimsContent() {
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [processing, setProcessing] = useState<number | null>(null);
+  
+  // Employee search autocomplete states
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    fetchEmployees();
+  }, []);
 
   useEffect(() => {
     fetchClaims();
-  }, [activeStatus, currentPage, itemsPerPage]);
+  }, [activeStatus, selectedEmployeeId, currentPage, itemsPerPage]);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => setShowSuggestions(false);
+    if (showSuggestions) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [showSuggestions]);
+
+  async function fetchEmployees() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/employees?include_inactive=false`);
+      if (!res.ok) throw new Error('Failed to fetch employees');
+      const data = await res.json();
+      setEmployees(data.employees || []);
+    } catch (err) {
+      console.error('Failed to load employees:', err);
+    }
+  }
 
   async function fetchClaims() {
     setLoading(true);
@@ -89,6 +125,9 @@ function ClaimsContent() {
       const params = new URLSearchParams();
       if (activeStatus) {
         params.set('status', activeStatus);
+      }
+      if (selectedEmployeeId) {
+        params.set('employee_id', selectedEmployeeId);
       }
       // Add pagination params
       params.set('limit', itemsPerPage.toString());
@@ -179,6 +218,31 @@ function ClaimsContent() {
 
   const statuses = ['', 'PENDING', 'APPEALED', 'APPROVED', 'REJECTED'];
 
+  // Filter employees based on search query
+  const filteredEmployees = employees.filter(emp =>
+    emp.name.toLowerCase().includes(employeeSearch.toLowerCase()) ||
+    emp.employee_code.toLowerCase().includes(employeeSearch.toLowerCase())
+  );
+
+  // Get selected employee name for display
+  const selectedEmployee = employees.find(emp => emp.id.toString() === selectedEmployeeId);
+
+  // Handle employee selection from suggestions
+  const handleSelectEmployee = (emp: Employee) => {
+    setSelectedEmployeeId(emp.id.toString());
+    setEmployeeSearch(`${emp.name} (${emp.employee_code})`);
+    setShowSuggestions(false);
+    setCurrentPage(1);
+  };
+
+  // Clear employee filter
+  const handleClearEmployee = () => {
+    setSelectedEmployeeId('');
+    setEmployeeSearch('');
+    setShowSuggestions(false);
+    setCurrentPage(1);
+  };
+
   // Get display name for status, showing "Appeal & Approved" for claims that went through appeal
   const getClaimStatusDisplay = (claim: Claim) => {
     if (claim.status_code === 'APPROVED' && claim.appeal_count && claim.appeal_count > 0) {
@@ -197,21 +261,76 @@ function ClaimsContent() {
         </div>
       </div>
 
-      {/* Status Filter Tabs */}
-      <div className="bg-white rounded-xl shadow-md p-2 inline-flex gap-2">
-        {statuses.map((status) => (
-          <button
-            key={status || 'all'}
-            onClick={() => { setActiveStatus(status); setCurrentPage(1); }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activeStatus === status
-                ? 'bg-indigo-600 text-white'
-                : 'text-gray-900 hover:bg-gray-100'
-            }`}
-          >
-            {status || 'All'}
-          </button>
-        ))}
+      {/* Filters Section */}
+      <div className="flex flex-wrap gap-4">
+        {/* Status Filter Tabs */}
+        <div className="bg-white rounded-xl shadow-md p-2 inline-flex gap-2">
+          {statuses.map((status) => (
+            <button
+              key={status || 'all'}
+              onClick={() => { setActiveStatus(status); setCurrentPage(1); }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeStatus === status
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              {status || 'All'}
+            </button>
+          ))}
+        </div>
+
+        {/* Employee Filter - Autocomplete Search */}
+        <div className="bg-white rounded-xl shadow-md p-2 relative">
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type="text"
+                value={employeeSearch}
+                onChange={(e) => {
+                  setEmployeeSearch(e.target.value);
+                  setShowSuggestions(true);
+                  if (!e.target.value) {
+                    setSelectedEmployeeId('');
+                    setCurrentPage(1);
+                  }
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                placeholder="🔍 Search employee..."
+                className="px-4 py-2 rounded-lg text-sm font-medium border-0 focus:ring-2 focus:ring-indigo-500 w-64"
+              />
+              {selectedEmployeeId && (
+                <button
+                  onClick={handleClearEmployee}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  title="Clear filter"
+                >
+                  ✕
+                </button>
+              )}
+              
+              {/* Suggestions Dropdown */}
+              {showSuggestions && employeeSearch && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto z-50">
+                  {filteredEmployees.length > 0 ? (
+                    filteredEmployees.map((emp) => (
+                      <button
+                        key={emp.id}
+                        onClick={() => handleSelectEmployee(emp)}
+                        className="w-full px-4 py-2 text-left hover:bg-indigo-50 flex items-center justify-between text-sm"
+                      >
+                        <span className="font-medium">{emp.name}</span>
+                        <span className="text-gray-500 text-xs">{emp.employee_code}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-2 text-sm text-gray-500">No employees found</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Error State */}

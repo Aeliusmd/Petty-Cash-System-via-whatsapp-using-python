@@ -285,8 +285,8 @@ Or type *skip* to submit without notes."""
             # Reset conversation
             await conversation_model.reset(chat_id)
             
-            # Notify staff of appeal submission
-            await notification_service.notify_staff_of_appeal_submitted(updated_claim)
+            # Notify staff of appeal submission - REMOVED: reply_engine already sends detailed message
+            # await notification_service.notify_staff_of_appeal_submitted(updated_claim)
             
             # Notify manager of appeal (with notes)
             await notification_service.notify_manager_of_appeal(updated_claim, appeal_notes)

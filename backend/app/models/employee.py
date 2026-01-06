@@ -155,11 +155,13 @@ async def create(data: dict) -> dict:
     
     result = await db.query("""
         INSERT INTO employees (employee_code, name, phone_number, email,
-                               grade_id, unit_id, location_id, manager_id, role)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
+                               grade_id, unit_id, location_id, manager_id, role,
+                               is_admin, is_manager)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *
     """, employee_code, data.get('name'), data.get('phone_number'),
         data.get('email'), data.get('grade_id'), data.get('unit_id'),
-        data.get('location_id'), data.get('manager_id'), data.get('role', 'staff'))
+        data.get('location_id'), data.get('manager_id'), data.get('role', 'staff'),
+        data.get('is_admin', False), data.get('is_manager', False))
     
     return result[0]
 
@@ -178,12 +180,15 @@ async def update(employee_id: int, data: dict) -> dict:
             manager_id = $8,
             role = COALESCE($9, role),
             is_active = COALESCE($10, is_active),
+            is_admin = COALESCE($12, is_admin),
+            is_manager = COALESCE($13, is_manager),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $11 RETURNING *
     """, data.get('employee_code'), data.get('name'), data.get('phone_number'),
         data.get('email'), data.get('grade_id'), data.get('unit_id'),
         data.get('location_id'), data.get('manager_id'), data.get('role'),
-        data.get('is_active'), employee_id)
+        data.get('is_active'), employee_id, 
+        data.get('is_admin'), data.get('is_manager'))
     
     return result[0] if result else None
 

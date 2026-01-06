@@ -35,6 +35,8 @@ from app.services import textract_service
 from app.services import notification_service
 from app.models import claim as claim_model
 from app.models import employee as employee_model
+from app.models import otp as otp_model
+from app.utils import jwt_utils
 
 
 # Message deduplication cache (prevents processing same message multiple times)
@@ -106,6 +108,15 @@ class ApproveClaimRequest(BaseModel):
     final_amount: Optional[float] = None
 
 
+class RequestOTPRequest(BaseModel):
+    phone_number: str
+
+
+class VerifyOTPRequest(BaseModel):
+    phone_number: str
+    otp_code: str
+
+
 @app.get("/")
 async def root():
     """Root endpoint"""
@@ -127,6 +138,156 @@ async def health():
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+# ==============================================
+# Authentication Endpoints
+# ==============================================
+
+@app.post("/api/auth/init-db")
+async def init_auth_database():
+    """
+    Initialize authentication database tables
+    Creates otp_codes table and adds is_admin column to employees
+    """
+    try:
+        # Create OTP codes table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS otp_codes (
+                id SERIAL PRIMARY KEY,
+                phone_number VARCHAR(20) NOT NULL,
+                code VARCHAR(6) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create indexes
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_phone_number_otp ON otp_codes(phone_number)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_expires_at_otp ON otp_codes(expires_at)")
+        
+        # Add is_admin and is_manager columns to employees
+        await db.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE")
+        await db.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_manager BOOLEAN DEFAULT FALSE")
+        
+        return {"message": "Authentication database initialized successfully"}
+    except Exception as e:
+        print(f"❌ Error initializing auth database: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/request-otp")
+async def request_otp(request: RequestOTPRequest):
+    """
+    Request an OTP code for login
+    Generates a 6-digit code and sends it via WhatsApp
+    """
+    try:
+        phone_number = request.phone_number.strip()
+        
+        # Normalize phone number (remove spaces, dashes)
+        import re
+        phone_number = re.sub(r'[\s\-+]', '', phone_number)
+        
+        # Check if employee exists
+        employee = await employee_model.find_by_phone(phone_number)
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found with this phone number")
+        
+        # Check rate limit
+        if await otp_model.check_rate_limit(phone_number):
+            raise HTTPException(status_code=429, detail="Too many OTP requests. Please wait 1 hour.")
+        
+        # Generate OTP
+        otp_code = await otp_model.generate_otp(phone_number)
+        
+        # Send OTP via WhatsApp
+        chat_id = employee.get('whatsapp_chat_id')
+        if chat_id:
+            message = f"""🔐 *Login Verification Code*
+
+Your OTP code is: *{otp_code}*
+
+This code will expire in 5 minutes.
+
+Do not share this code with anyone."""
+            await waha_client.send_text(chat_id, message)
+            print(f"✅ Sent OTP {otp_code} to {employee['name']}")
+        else:
+            print(f"⚠️ No WhatsApp chat ID for {employee['name']}, OTP: {otp_code}")
+        
+        return {
+            "message": "OTP sent successfully",
+            "phone_number": phone_number,
+            # For testing/dev: include OTP in response (remove in production!)
+            "otp_code": otp_code if not os.getenv('PRODUCTION') else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error requesting OTP: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send OTP")
+
+
+@app.post("/api/auth/verify-otp")
+async def verify_otp(request: VerifyOTPRequest):
+    """
+    Verify OTP code and return JWT token
+    """
+    try:
+        phone_number = request.phone_number.strip()
+        otp_code = request.otp_code.strip()
+        
+        # Normalize phone number
+        import re
+        phone_number = re.sub(r'[\s\-+]', '', phone_number)
+        
+        # Verify OTP
+        is_valid = await otp_model.verify_otp(phone_number, otp_code)
+        if not is_valid:
+            raise HTTPException(status_code=401, detail="Invalid or expired OTP code")
+        
+        # Get employee details
+        employee = await employee_model.find_by_phone(phone_number)
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Determine role: admin > manager > employee
+        is_admin = employee.get('is_admin', False)
+        is_manager = employee.get('is_manager', False)
+        
+        if is_admin:
+            role = 'admin'
+        elif is_manager:
+            role = 'manager'
+        else:
+            role = 'employee'
+        
+        # Generate JWT token
+        token = jwt_utils.create_access_token(
+            employee_id=employee['id'],
+            name=employee['name'],
+            is_admin=is_admin,
+            is_manager=is_manager
+        )
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "employee": {
+                "id": employee['id'],
+                "name": employee['name'],
+                "employee_code": employee['employee_code'],
+                "role": role
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error verifying OTP: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify OTP")
 
 
 async def process_message(correlation_id: str, payload: dict, session: str):
@@ -407,6 +568,9 @@ async def get_claims(
         params = []
         param_index = 1
         
+        # DEBUG: Print filters
+        print(f"🔍 get_claims filters: employee_id={employee_id}, status={status}, user_role={role if 'role' in locals() else 'unknown'}")
+
         if status:
             query += f" AND s.code = ${param_index}"
             params.append(status.upper())
@@ -709,6 +873,8 @@ class CreateEmployeeRequest(BaseModel):
     location_id: Optional[int] = None
     manager_id: Optional[int] = None
     role: str = "staff"
+    is_admin: bool = False
+    is_manager: bool = False
 
 
 @app.post("/api/employees")
@@ -717,6 +883,17 @@ async def create_employee(request: CreateEmployeeRequest):
     Create a new employee
     """
     try:
+        # Sync role flags based on role string
+        if request.role == 'admin':
+            request.is_admin = True
+            request.is_manager = False
+        elif request.role == 'manager':
+            request.is_manager = True
+            request.is_admin = False
+        else:
+            request.is_admin = False
+            request.is_manager = False
+
         employee = await employee_model.create(request.model_dump())
         return {
             "success": True,
@@ -739,6 +916,8 @@ class UpdateEmployeeRequest(BaseModel):
     manager_id: Optional[int] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    is_admin: Optional[bool] = None
+    is_manager: Optional[bool] = None
 
 
 @app.put("/api/employees/{employee_id}")
@@ -751,7 +930,21 @@ async def update_employee(employee_id: int, request: UpdateEmployeeRequest):
         if not existing:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        employee = await employee_model.update(employee_id, request.model_dump(exclude_unset=True))
+        # Sync role flags if role is being updated
+        update_data = request.model_dump(exclude_unset=True)
+        if 'role' in update_data:
+            role = update_data['role']
+            if role == 'admin':
+                update_data['is_admin'] = True
+                update_data['is_manager'] = False
+            elif role == 'manager':
+                update_data['is_manager'] = True
+                update_data['is_admin'] = False
+            else:
+                update_data['is_admin'] = False
+                update_data['is_manager'] = False
+        
+        employee = await employee_model.update(employee_id, update_data)
         if not employee:
             raise HTTPException(status_code=500, detail="Failed to update employee")
         

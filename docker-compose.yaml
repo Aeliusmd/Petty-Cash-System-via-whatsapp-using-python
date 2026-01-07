@@ -59,6 +59,9 @@ services:
       - WAHA_BASE_URL=http://waha:3000
       - DB_HOST=host.docker.internal
 
+    volumes:
+      - ./backend/receipts:/app/backend/receipts
+
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

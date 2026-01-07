@@ -82,6 +82,85 @@ async def lifespan(app: FastAPI):
     await db.close()
 
 
+# Helper function to save media file
+async def save_media_file(media_data: str = None, media_url: str = None, 
+                         mime_type: str = None, filename: str = None) -> tuple[str, int]:
+    """
+    Save media file to receipts directory
+    Returns: (file_path, file_size)
+    """
+    import base64
+    import httpx  # Use httpx instead of aiohttp (already installed)
+    import uuid
+    from datetime import datetime
+    
+    print(f"💾 save_media_file called: data={bool(media_data)}, url={bool(media_url)}, mime={mime_type}, filename={filename}")
+    
+    # Create receipts directory if it doesn't exist
+    receipts_dir = Path(__file__).parent.parent / 'receipts'
+    print(f"💾 Receipts directory: {receipts_dir}")
+    receipts_dir.mkdir(exist_ok=True)
+    
+    # Generate unique filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    unique_id = str(uuid.uuid4())[:8]
+    
+    # Determine file extension
+    ext = ''
+    if filename:
+        ext = Path(filename).suffix
+    elif mime_type:
+        if 'jpeg' in mime_type or 'jpg' in mime_type:
+            ext = '.jpg'
+        elif 'png' in mime_type:
+            ext = '.png'
+        elif 'pdf' in mime_type:
+            ext = '.pdf'
+        elif 'gif' in mime_type:
+            ext = '.gif'
+    
+    if not ext:
+        ext = '.jpg'  # Default
+    
+    new_filename = f"receipt_{timestamp}_{unique_id}{ext}"
+    file_path = receipts_dir / new_filename
+    
+    print(f"💾 Will save to: {file_path}")
+    
+    # Save file
+    file_size = 0
+    try:
+        if media_data:
+            # Decode base64 and save
+            print(f"💾 Saving from base64 data ({len(media_data)} chars)")
+            file_bytes = base64.b64decode(media_data)
+            file_size = len(file_bytes)
+            with open(file_path, 'wb') as f:
+                f.write(file_bytes)
+            print(f"✅ Saved {file_size} bytes to {file_path}")
+        elif media_url:
+            # Download from URL and save using httpx
+            print(f"💾 Downloading from URL: {media_url[:100]}...")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(media_url)
+                if response.status_code == 200:
+                    file_bytes = response.content
+                    file_size = len(file_bytes)
+                    with open(file_path, 'wb') as f:
+                        f.write(file_bytes)
+                    print(f"✅ Downloaded and saved {file_size} bytes to {file_path}")
+                else:
+                    print(f"❌ Download failed: HTTP {response.status_code}")
+        else:
+            print("⚠️ No media_data or media_url provided to save_media_file")
+    except Exception as e:
+        print(f"❌ Error saving file: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return (str(new_filename), file_size)
+
+
 app = FastAPI(
     title="WhatsApp Petty Cash Backend",
     description="Receives webhook events from WAHA and sends auto-replies",
@@ -381,6 +460,10 @@ async def process_message(correlation_id: str, payload: dict, session: str):
         # CAREFUL: WAHA might put OCR text in body if configured to do so?
         # Assuming body is user caption or empty.
 
+        # Initialize variables for media processing
+        extraction_result = None
+        extracted_amount = None
+
         # MEDIA HANDLING
         if has_media:
             print(f'[{correlation_id}] 📎 Processing media: type={media_type}, mime={mime_type}')
@@ -420,26 +503,58 @@ async def process_message(correlation_id: str, payload: dict, session: str):
                 if extraction_result and extraction_result.get('success') and extraction_result.get('text'):
                     print(f'[{correlation_id}] 📄 Extracted text (len={len(extraction_result["text"])})')
 
-                    # Use OpenAI to intelligently parse the receipt text
-                    from app.services import openai_service
-                    ai_result = await openai_service.parse_receipt_text(extraction_result['text'])
-                    
-                    extracted_amount = None
                     extracted_vendor = None
                     extracted_date = None
                     
-                    if ai_result.get('success'):
+                    # Get vendor and date from Textract expense data (these are usually accurate)
+                    expense_data = extraction_result.get('expense')
+                    if expense_data:
+                        extracted_vendor = expense_data.get('vendorName')
+                        extracted_date = expense_data.get('date')
+                        if extracted_vendor:
+                            print(f'[{correlation_id}] 🧾 Textract vendor: {extracted_vendor}')
+                        if extracted_date:
+                            print(f'[{correlation_id}] 🧾 Textract date: {extracted_date}')
+                    
+                    # PRIORITY 1: Use OpenAI for amount detection (most accurate for finding Net Total!)
+                    from app.services import openai_service
+                    ai_result = await openai_service.parse_receipt_text(extraction_result['text'])
+                    
+                    if ai_result.get('success') and ai_result.get('total_amount'):
                         extracted_amount = ai_result.get('total_amount')
-                        extracted_vendor = ai_result.get('vendor_name')
-                        extracted_date = ai_result.get('date')
+                        # Use AI vendor/date if Textract didn't find them
+                        extracted_vendor = extracted_vendor or ai_result.get('vendor_name')
+                        extracted_date = extracted_date or ai_result.get('date')
                         print(f'[{correlation_id}] 🤖 OpenAI parsed: Amount={extracted_amount}, Vendor={extracted_vendor}, Date={extracted_date}')
                     else:
-                        # Fallback to regex extraction
-                        print(f'[{correlation_id}] ⚠️ OpenAI parsing failed/skipped, using regex fallback')
-                        extracted_amount = textract_service.extract_amount_from_text(extraction_result['text'])
+                        print(f'[{correlation_id}] ⚠️ OpenAI parsing failed/skipped')
+                        
+                        # PRIORITY 2: Try regex for "Net Total" specifically
+                        import re
+                        net_total_match = re.search(r'Net\s*Total[:\s]*(?:Rs\.?|LKR)?\s*([\d,]+(?:\.\d{2})?)', extraction_result['text'], re.IGNORECASE)
+                        if net_total_match:
+                            extracted_amount = float(net_total_match.group(1).replace(',', ''))
+                            print(f'[{correlation_id}] 📊 Found Net Total via regex: Rs.{extracted_amount}')
+                        else:
+                            # PRIORITY 3: Try Textract expense total (but it's often wrong!)
+                            if expense_data and expense_data.get('total'):
+                                total_str = expense_data.get('total', '')
+                                try:
+                                    cleaned = total_str.replace(',', '').replace('Rs.', '').replace('LKR', '').strip()
+                                    extracted_amount = float(cleaned)
+                                    print(f'[{correlation_id}] 🧾 Using Textract expense total: Rs.{extracted_amount}')
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # PRIORITY 4: Last resort - generic regex
+                            if not extracted_amount:
+                                extracted_amount = textract_service.extract_amount_from_text(extraction_result['text'])
+                                if extracted_amount:
+                                    print(f'[{correlation_id}] 📊 Regex fallback amount: Rs.{extracted_amount}')
 
                     if extracted_amount:
                         print(f'[{correlation_id}] 💰 Final detected amount: Rs.{extracted_amount}')
+
 
                     # Add parsed data to message for processing
                     details_text = ""
@@ -489,12 +604,30 @@ async def process_message(correlation_id: str, payload: dict, session: str):
         # Build media_info dict for forwarding to manager
         current_media_info = None
         if has_media and (media_data or media_url):
+            # Save the media file to disk
+            saved_filename = None
+            saved_file_size = 0
+            try:
+                saved_filename, saved_file_size = await save_media_file(
+                    media_data=media_data,
+                    media_url=media_url,
+                    mime_type=mime_type,
+                    filename=media_filename
+                )
+                print(f'[{correlation_id}] 💾 Media file saved: {saved_filename} ({saved_file_size} bytes)')
+            except Exception as save_error:
+                print(f'[{correlation_id}] ⚠️ Failed to save media file: {save_error}')
+            
             current_media_info = {
                 'url': media_url,
                 'data': media_data,
                 'mimetype': mime_type,
                 'filename': media_filename,
-                'message_id': message_id
+                'message_id': message_id,
+                'saved_filename': saved_filename,
+                'saved_file_size': saved_file_size,
+                'extracted_amount': extracted_amount,
+                'ocr_text': extraction_result.get('text') if extraction_result else None
             }
             print(f'[{correlation_id}] 📎 Media info prepared for forwarding')
 

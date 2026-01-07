@@ -910,6 +910,23 @@ Or type *skip* if you don't have one."""
                 # Get media_info from context (if receipt was uploaded)
                 stored_media_info = context.get('media_info')
                 
+                # Save receipt to database if media was uploaded
+                if stored_media_info and stored_media_info.get('saved_filename'):
+                    try:
+                        print(f"💾 Saving receipt to database for claim {claim['id']}")
+                        await claim_model.add_receipt(
+                            claim_id=claim['id'],
+                            file_path=stored_media_info.get('saved_filename'),
+                            file_name=stored_media_info.get('saved_filename'),
+                            file_type=stored_media_info.get('mimetype'),
+                            file_size=stored_media_info.get('saved_file_size'),
+                            ocr_amount=stored_media_info.get('extracted_amount'),
+                            ocr_raw_text=stored_media_info.get('ocr_text')
+                        )
+                        print(f"✅ Receipt saved to database successfully")
+                    except Exception as receipt_error:
+                        print(f"⚠️ Failed to save receipt to database: {receipt_error}")
+                
                 # Notify manager with claim details and receipt
                 print(f"🔍 DEBUG: employee.manager_id={employee.get('manager_id')}, manager_name={employee.get('manager_name')}")
                 if employee.get('manager_id'):

@@ -10,6 +10,9 @@ import re
 from typing import Optional
 
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 # Initialize Textract client
 textract_client = boto3.client(
     'textract',
@@ -18,6 +21,10 @@ textract_client = boto3.client(
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
 )
 
+async def run_in_thread(func, *args, **kwargs):
+    """Helper to run sync functions in a thread"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 async def extract_text_from_image(image_buffer: bytes) -> dict:
     """
@@ -30,7 +37,8 @@ async def extract_text_from_image(image_buffer: bytes) -> dict:
         Extracted text and confidence
     """
     try:
-        response = textract_client.detect_document_text(
+        response = await run_in_thread(
+            textract_client.detect_document_text,
             Document={'Bytes': image_buffer}
         )
         
@@ -86,7 +94,8 @@ async def extract_expense_from_image(image_buffer: bytes) -> dict:
         Extracted expense data
     """
     try:
-        response = textract_client.analyze_expense(
+        response = await run_in_thread(
+            textract_client.analyze_expense,
             Document={'Bytes': image_buffer}
         )
         

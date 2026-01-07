@@ -82,10 +82,24 @@ def extract_days(text: str) -> int:
 
 
 def extract_amount(text: str) -> Optional[float]:
-    """Extract amount from text (e.g., "Rs.5000", "LKR 3000", "5000")"""
-    match = re.search(r'(?:rs\.?|lkr\.?|රු\.?)?\s*(\d+(?:,\d{3})*(?:\.\d{2})?)', text, re.IGNORECASE)
-    if match:
-        return float(match.group(1).replace(',', ''))
+    """
+    Extract amount from text (e.g., "Rs.5000", "LKR 3000", "5000")
+    Prioritizes amounts with currency prefix over bare numbers
+    """
+    if not text:
+        return None
+    
+    # First try to find amounts with explicit currency prefix (Rs., LKR, රු.)
+    currency_match = re.search(r'(?:rs\.?|lkr\.?|රු\.?)\s*(\d+(?:,\d{3})*(?:\.\d{2})?)', text, re.IGNORECASE)
+    if currency_match:
+        return float(currency_match.group(1).replace(',', ''))
+    
+    # Look for amounts at end of text or standalone large numbers (likely to be prices)
+    # Avoid extracting small numbers like "3" from "3 nights"
+    large_num_match = re.search(r'\b(\d{3,}(?:,\d{3})*(?:\.\d{2})?)\b', text)
+    if large_num_match:
+        return float(large_num_match.group(1).replace(',', ''))
+    
     return None
 
 
@@ -94,17 +108,20 @@ def format_currency(amount: float) -> str:
     return f"Rs.{amount:,.0f}"
 
 
-async def generate_reply(message_text: str, chat_id: str) -> Optional[str]:
+async def generate_reply(message_text: str, chat_id: str, media_info: dict = None) -> Optional[str]:
     """
     Main reply generation function
     
     Args:
         message_text: The incoming message text
         chat_id: The chat ID for conversation context
+        media_info: Optional dict with media info (url, data, mimetype, filename)
         
     Returns:
         Reply text or None if no reply
     """
+    from app.services import notification_service
+    
     # 1. Skip group chats entirely
     if is_group_chat(chat_id):
         print(f'⏭️ Skipping group chat: {chat_id}')
@@ -205,6 +222,105 @@ async def generate_reply(message_text: str, chat_id: str) -> Optional[str]:
 💰 Rate: *{format_currency(rate)}/day* (Grade {employee.get('grade_code')})
 
 How many days?"""
+
+    # ===== HANDLE MANAGER APPROVE/REJECT COMMANDS =====
+    # Check if employee is a manager and handle approve/reject commands
+    is_manager = employee.get('is_manager', False) or employee.get('is_admin', False)
+    
+    # Clean text: remove emojis and extra whitespace for command matching
+    clean_text = re.sub(r'[^\w\s#-]', '', text).strip()
+    
+    # Approve command: flexible matching - "approve 123", "✅ Approve 12", "Approve #12", etc.
+    approve_match = re.search(r'\bapprove\s*#?(\d+)\b', clean_text, re.IGNORECASE)
+    if approve_match and is_manager:
+        claim_id = int(approve_match.group(1))
+        try:
+            # Find the claim
+            claim = await claim_model.find_by_id(claim_id)
+            if not claim:
+                return f"❌ Claim #{claim_id} not found."
+            
+            # Verify this manager is authorized to approve this claim
+            if claim.get('manager_id') != employee['id']:
+                return f"❌ You are not authorized to approve this claim."
+            
+            # Check status
+            current_status = claim.get('status_code')
+            if current_status not in ('PENDING', 'APPEALED'):
+                return f"❌ Claim #{claim_id} is already {claim.get('status_name')}."
+            
+            # Record status change
+            await claim_model.record_status_change(
+                claim_id, current_status, 'APPROVED', employee['id'], 'Approved via WhatsApp'
+            )
+            
+            # Approve the claim
+            await claim_model.approve(claim_id, employee['id'])
+            
+            # Notify the employee
+            await notification_service.notify_staff_of_approval(claim)
+            
+            return f"""✅ *Claim Approved!*
+
+📋 Claim #: *{claim['claim_number']}*
+👤 Staff: {claim.get('employee_name', 'N/A')}
+💵 Amount: {format_currency(claim.get('user_amount') or claim.get('system_amount') or 0)}
+
+The employee has been notified."""
+        except Exception as e:
+            print(f"❌ Error approving claim via WhatsApp: {e}")
+            return f"❌ Error approving claim. Please try again."
+    
+    # Reject command: flexible matching - "reject 123 reason", "❌ Reject #12 Invalid", etc.
+    reject_match = re.search(r'\breject\s*#?(\d+)(?:\s+(.+))?', clean_text, re.IGNORECASE)
+    if reject_match and is_manager:
+        claim_id = int(reject_match.group(1))
+        reason = reject_match.group(2).strip() if reject_match.group(2) else None
+        
+        # If no reason provided, ask for it
+        if not reason or len(reason) < 3:
+            return f"""❌ Please provide a rejection reason.
+
+Example: *Reject {claim_id} Invalid receipt* or *Reject {claim_id} Missing details*"""
+        
+        try:
+            # Find the claim
+            claim = await claim_model.find_by_id(claim_id)
+            if not claim:
+                return f"❌ Claim #{claim_id} not found."
+            
+            # Verify this manager is authorized
+            if claim.get('manager_id') != employee['id']:
+                return f"❌ You are not authorized to reject this claim."
+            
+            # Check status
+            current_status = claim.get('status_code')
+            if current_status not in ('PENDING', 'APPEALED'):
+                return f"❌ Claim #{claim_id} is already {claim.get('status_name')}."
+            
+            # Record status change
+            await claim_model.record_status_change(
+                claim_id, current_status, 'REJECTED', employee['id'], reason
+            )
+            
+            # Reject the claim
+            await claim_model.reject(claim_id, employee['id'], reason)
+            
+            # Notify the employee
+            await notification_service.notify_staff_of_rejection(claim, reason)
+            
+            return f"""❌ *Claim Rejected*
+
+📋 Claim #: *{claim['claim_number']}*
+👤 Staff: {claim.get('employee_name', 'N/A')}
+📝 Reason: {reason}
+
+The employee has been notified and can appeal."""
+        except Exception as e:
+            print(f"❌ Error rejecting claim via WhatsApp: {e}")
+            return f"❌ Error rejecting claim. Please try again."
+    
+
 
     # ===== HANDLE GREETINGS - SHOW MAIN MENU =====
     if text in ('hi', 'hello', 'hey', 'menu', 'start'):
@@ -340,7 +456,8 @@ Type "hi" or "menu" for more options."""
                     'receipt_date': date_str,
                     'user_amount': amount,
                     'details': extracted_text[:500],
-                    'has_receipt': True
+                    'has_receipt': True,
+                    'media_info': media_info  # Store media for forwarding to manager
                 }
             })
             
@@ -365,7 +482,8 @@ Type *confirm* to submit or *menu* to start over."""
                 'receipt_date': date_str,
                 'user_amount': amount,
                 'extracted_text': extracted_text[:500],
-                'has_receipt': True
+                'has_receipt': True,
+                'media_info': media_info  # Store media for forwarding to manager
             }
         })
         
@@ -565,7 +683,7 @@ How many days?"""
         total_amount = rate_per_day * days
 
         await conversation_model.update(chat_id, {
-            'current_step': 'confirm',
+            'current_step': 'receipt_upload',
             'context': {
                 **context,
                 'days': days,
@@ -573,7 +691,7 @@ How many days?"""
             }
         })
 
-        return f"""✅ *Batta Claim Summary*
+        return f"""✅ *Batta Claim Details*
 
 👤 Employee: {employee['name']}
 📍 Location: {context.get('location_name')}
@@ -581,14 +699,15 @@ How many days?"""
 💰 Rate: {format_currency(rate_per_day)}/day
 💵 *Total: {format_currency(total_amount)}*
 
-Type *confirm* to submit or *menu* to start over."""
+📎 Please upload your receipt/supporting document (image or PDF).
+Or type *skip* if you don't have one."""
 
     # ===== FUEL FLOW =====
     if current_step == 'fuel_details':
         amount = extract_amount(text)
         
         await conversation_model.update(chat_id, {
-            'current_step': 'confirm',
+            'current_step': 'receipt_upload',
             'context': {
                 'details': message_text,
                 'user_amount': amount
@@ -597,12 +716,13 @@ Type *confirm* to submit or *menu* to start over."""
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Fuel Expense Summary*
+        return f"""✅ *Fuel Expense Details*
 
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-Type *confirm* to submit or *menu* to start over."""
+📎 Please upload your fuel receipt (image or PDF).
+Or type *skip* if you don't have one."""
 
     # ===== ACCOMMODATION FLOW =====
     if current_step == 'accommodation_details':
@@ -610,7 +730,7 @@ Type *confirm* to submit or *menu* to start over."""
         location = await find_location_in_text(text)
         
         await conversation_model.update(chat_id, {
-            'current_step': 'confirm',
+            'current_step': 'receipt_upload',
             'context': {
                 'details': message_text,
                 'user_amount': amount,
@@ -621,19 +741,20 @@ Type *confirm* to submit or *menu* to start over."""
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Accommodation Claim Summary*
+        return f"""✅ *Accommodation Claim Details*
 
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-Type *confirm* to submit or *menu* to start over."""
+📎 Please upload your hotel bill/invoice (image or PDF).
+Or type *skip* if you don't have one."""
 
     # ===== SUNDRY FLOW =====
     if current_step == 'sundry_details':
         amount = extract_amount(text)
         
         await conversation_model.update(chat_id, {
-            'current_step': 'confirm',
+            'current_step': 'receipt_upload',
             'context': {
                 'details': message_text,
                 'user_amount': amount
@@ -642,12 +763,126 @@ Type *confirm* to submit or *menu* to start over."""
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Sundry Expense Summary*
+        return f"""✅ *Sundry Expense Details*
 
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-Type *confirm* to submit or *menu* to start over."""
+📎 Please upload your receipt/invoice (image or PDF).
+Or type *skip* if you don't have one."""
+
+    # ===== RECEIPT UPLOAD STEP =====
+    if current_step == 'receipt_upload':
+        # Handle skip command
+        if text in ('skip', 'no', 'none'):
+            await conversation_model.update(chat_id, {
+                'current_step': 'confirm',
+                'context': context
+            })
+            
+            # Build summary based on category
+            category_code = state.get('category')
+            summary = f"""✅ *Claim Summary*
+
+👤 Employee: {employee['name']}
+📁 Category: {category_code}
+📝 Details: {context.get('details', 'N/A')}"""
+            
+            if context.get('location_name'):
+                summary += f"\n📍 Location: {context['location_name']}"
+            if context.get('days'):
+                summary += f"\n🗓️ Days: {context['days']}"
+            if context.get('total_amount'):
+                summary += f"\n💵 Amount: {format_currency(context['total_amount'])}"
+            elif context.get('user_amount'):
+                summary += f"\n💵 Amount: {format_currency(context['user_amount'])}"
+            
+            summary += "\n🧾 Receipt: Not provided\n\nType *confirm* to submit or *menu* to start over."
+            return summary
+        
+        # If media_info is provided (user uploaded a file), process it
+        if media_info:
+            print(f"🔍 DEBUG receipt_upload: media_info present, message_text preview: {message_text[:200]}")
+            
+            # Try to extract information from message_text (Textract results)
+            extracted_amount = None
+            extracted_vendor = None
+            extracted_date = None
+            
+            if '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
+                print("✅ Found [RECEIPT/DOCUMENT UPLOADED] marker in message_text")
+                # Parse extracted text
+                if 'Extracted text:' in message_text:
+                    # Extract vendor
+                    if 'Vendor:' in message_text:
+                        vendor_part = message_text.split('Vendor:', 1)[1]
+                        extracted_vendor = vendor_part.split('\n')[0].strip()
+                        print(f"🏪 Extracted vendor: {extracted_vendor}")
+                    
+                    # Extract amount
+                    if 'Detected amount: Rs.' in message_text:
+                        amount_str = message_text.split('Detected amount: Rs.', 1)[1].split('\n')[0].strip()
+                        try:
+                            extracted_amount = float(amount_str.replace(',', ''))
+                            print(f"💰 Extracted amount: Rs.{extracted_amount}")
+                        except Exception as e:
+                            print(f"❌ Error parsing amount: {e}")
+                    
+                    # Extract date
+                    if 'Date:' in message_text:
+                        date_part = message_text.split('Date:', 1)[1]
+                        extracted_date = date_part.split('\n')[0].strip()
+                        print(f"📅 Extracted date: {extracted_date}")
+            else:
+                print("⚠️ No [RECEIPT/DOCUMENT UPLOADED] marker found in message_text")
+            
+            # Auto-fill amount if not already set and extracted from receipt
+            updated_context = {**context, 'media_info': media_info}
+            if extracted_amount and not context.get('user_amount') and not context.get('total_amount'):
+                updated_context['user_amount'] = extracted_amount
+                print(f"💰 Auto-filled amount from receipt: Rs.{extracted_amount}")
+            
+            # Store media_info in context for later use
+            await conversation_model.update(chat_id, {
+                'current_step': 'confirm',
+                'context': updated_context
+            })
+            
+            # Build summary
+            category_code = state.get('category')
+            summary = f"""✅ *Claim Summary*
+
+👤 Employee: {employee['name']}
+📁 Category: {category_code}
+📝 Details: {context.get('details', 'N/A')}"""
+            
+            if context.get('location_name'):
+                summary += f"\n📍 Location: {context['location_name']}"
+            if context.get('days'):
+                summary += f"\n🗓️ Days: {context['days']}"
+            
+            # Show amount (prefer extracted if available and no existing amount)
+            display_amount = context.get('total_amount') or updated_context.get('user_amount') or context.get('user_amount')
+            if display_amount:
+                summary += f"\n💵 Amount: {format_currency(display_amount)}"
+                if extracted_amount and not (context.get('user_amount') or context.get('total_amount')):
+                    summary += " (auto-detected from receipt)"
+            
+            summary += "\n🧾 Receipt: ✅ Uploaded"
+            
+            # Add extracted details if available
+            if extracted_vendor or extracted_date:
+                summary += "\n\n📋 *Receipt Details:*"
+                if extracted_vendor:
+                    summary += f"\n   Vendor: {extracted_vendor}"
+                if extracted_date:
+                    summary += f"\n   Date: {extracted_date}"
+            
+            summary += "\n\nType *confirm* to submit or *menu* to start over."
+            return summary
+        
+        # If no media and not skip, remind user
+        return """📎 Please upload your receipt (image or PDF), or type *skip* to continue without one."""
 
     # ===== CONFIRMATION =====
     if current_step == 'confirm':
@@ -671,6 +906,17 @@ Type *confirm* to submit or *menu* to start over."""
                     'description': context.get('details') or f'{category_code} claim',
                     'manager_id': employee.get('manager_id')
                 })
+
+                # Get media_info from context (if receipt was uploaded)
+                stored_media_info = context.get('media_info')
+                
+                # Notify manager with claim details and receipt
+                print(f"🔍 DEBUG: employee.manager_id={employee.get('manager_id')}, manager_name={employee.get('manager_name')}")
+                if employee.get('manager_id'):
+                    print(f"📤 Sending notification to manager ID: {employee.get('manager_id')}")
+                    await notification_service.notify_manager_of_new_claim(claim, stored_media_info)
+                else:
+                    print(f"⚠️ No manager assigned to employee {employee['name']} - skipping manager notification")
 
                 # Reset conversation
                 await conversation_model.reset(chat_id)

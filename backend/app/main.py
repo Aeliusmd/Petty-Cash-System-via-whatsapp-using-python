@@ -295,6 +295,9 @@ async def process_message(correlation_id: str, payload: dict, session: str):
     Background task to process incoming WhatsApp message
     """
     try:
+        # Extract message_id early for use throughout processing
+        message_id = payload.get('id') or (payload.get('_data', {}).get('id', {}).get('id'))
+        
         # DEBUG: Log complete payload structure to understand WAHA format
         import json
         print(f'[{correlation_id}] 🔍 DEBUG: Full payload structure:')
@@ -302,6 +305,7 @@ async def process_message(correlation_id: str, payload: dict, session: str):
         
         print(f'[{correlation_id}] 🔍 DEBUG: Payload keys: {list(payload.keys())}')
         print(f'[{correlation_id}] 🔍 DEBUG: body={payload.get("body")}, text={payload.get("text")}, type={payload.get("type")}')
+        print(f'[{correlation_id}] 🔍 DEBUG: message_id={message_id}, fromMe={payload.get("fromMe")}')
         
         # Check if message is from us (outgoing)
         is_from_me = payload.get('fromMe') or payload.get('from_me', False)
@@ -351,6 +355,8 @@ async def process_message(correlation_id: str, payload: dict, session: str):
 
         # Check for media attachments (image, document, pdf)
         has_media = payload.get('hasMedia') or payload.get('media') or (payload.get('_data') or {}).get('media')
+        print(f'[{correlation_id}] 🔍 DEBUG: has_media={has_media}')
+        
         media_type = payload.get('type') or payload.get('messageType') or (payload.get('_data') or {}).get('type')
         mime_type = payload.get('mimetype') or (payload.get('_data') or {}).get('mimetype', '') or ''
 
@@ -368,21 +374,27 @@ async def process_message(correlation_id: str, payload: dict, session: str):
         media_filename = (media_obj.get('filename') or
                           _data_media_obj.get('filename'))
 
-        # Handle media messages (images, PDFs)
-        if has_media and (media_type in ('image', 'document') or 
-                          'image' in mime_type or 'pdf' in mime_type):
-            print(f'[{correlation_id}] 📎 Media attachment detected: {media_type} ({mime_type})')
-            print(f'[{correlation_id}] 📎 Media fields - hasData: {bool(media_data)}, hasUrl: {bool(media_url)}, filename: {media_filename or "none"}')
+        # Extract message content
+        message_text = payload.get('body') or (payload.get('_data') or {}).get('body') or ''
+        
+        # If user explicitly typed a caption, use that. 
+        # CAREFUL: WAHA might put OCR text in body if configured to do so?
+        # Assuming body is user caption or empty.
 
+        # MEDIA HANDLING
+        if has_media:
+            print(f'[{correlation_id}] 📎 Processing media: type={media_type}, mime={mime_type}')
             try:
                 extraction_result = None
-
+                
                 # Option 1: Use base64 data directly from payload
                 if media_data:
                     print(f'[{correlation_id}] 📥 Using base64 media data from payload')
                     import base64
                     image_buffer = base64.b64decode(media_data)
+                    print(f'[{correlation_id}] 🔄 Calling Textract...')
                     extraction_result = await textract_service.extract_text_from_image(image_buffer)
+                    print(f'[{correlation_id}] ✅ Textract complete')
 
                 # Option 2: Use media URL if provided
                 elif media_url:
@@ -401,18 +413,44 @@ async def process_message(correlation_id: str, payload: dict, session: str):
                     files_url = f"{waha_base_url}/api/files/{waha_session}/{media_filename}"
                     print(f'[{correlation_id}] 📥 Trying files endpoint: {files_url}')
                     extraction_result = await textract_service.extract_text_from_url(files_url, mime_type)
+                
+                else:
+                    print(f'[{correlation_id}] ⚠️ No media data/url/filename found')
 
                 if extraction_result and extraction_result.get('success') and extraction_result.get('text'):
-                    print(f'[{correlation_id}] 📄 Extracted text: "{extraction_result["text"][:100]}..."')
+                    print(f'[{correlation_id}] 📄 Extracted text (len={len(extraction_result["text"])})')
 
-                    # Extract amount if this is a receipt
-                    extracted_amount = textract_service.extract_amount_from_text(extraction_result['text'])
+                    # Use OpenAI to intelligently parse the receipt text
+                    from app.services import openai_service
+                    ai_result = await openai_service.parse_receipt_text(extraction_result['text'])
+                    
+                    extracted_amount = None
+                    extracted_vendor = None
+                    extracted_date = None
+                    
+                    if ai_result.get('success'):
+                        extracted_amount = ai_result.get('total_amount')
+                        extracted_vendor = ai_result.get('vendor_name')
+                        extracted_date = ai_result.get('date')
+                        print(f'[{correlation_id}] 🤖 OpenAI parsed: Amount={extracted_amount}, Vendor={extracted_vendor}, Date={extracted_date}')
+                    else:
+                        # Fallback to regex extraction
+                        print(f'[{correlation_id}] ⚠️ OpenAI parsing failed/skipped, using regex fallback')
+                        extracted_amount = textract_service.extract_amount_from_text(extraction_result['text'])
+
                     if extracted_amount:
-                        print(f'[{correlation_id}] 💰 Detected amount: Rs.{extracted_amount}')
+                        print(f'[{correlation_id}] 💰 Final detected amount: Rs.{extracted_amount}')
 
-                    # Add extracted text to message for processing
-                    amount_text = f'\nDetected amount: Rs.{extracted_amount}' if extracted_amount else ''
-                    message_text = f"[RECEIPT/DOCUMENT UPLOADED]\nExtracted text: {extraction_result['text']}{amount_text}"
+                    # Add parsed data to message for processing
+                    details_text = ""
+                    if extracted_amount:
+                        details_text += f"\nDetected amount: Rs.{extracted_amount}"
+                    if extracted_vendor:
+                        details_text += f"\nVendor: {extracted_vendor}"
+                    if extracted_date:
+                        details_text += f"\nDate: {extracted_date}"
+                        
+                    message_text = f"[RECEIPT/DOCUMENT UPLOADED]\nExtracted text: {extraction_result['text']}{details_text}"
                 else:
                     print(f'[{correlation_id}] ⚠️ Could not extract text from media')
                     message_text = "[IMAGE/DOCUMENT UPLOADED - Text extraction pending]"
@@ -431,19 +469,37 @@ async def process_message(correlation_id: str, payload: dict, session: str):
                 print(f'[{correlation_id}] 📍 Location detected: {lat}, {lon}')
                 message_text = f"[LOCATION_SHARED] lat:{lat} lon:{lon}"
 
-        if not message_text:
+        # Only skip if BOTH no text AND no media
+        if not message_text and not has_media:
             # Debug: Log payload structure to help diagnose empty message issues
             print(f'[{correlation_id}] 🔍 DEBUG: Empty message, payload keys: {list(payload.keys())}')
             if payload.get('_data'):
                 print(f'[{correlation_id}] 🔍 DEBUG: _data keys: {list(payload.get("_data", {}).keys())}')
-            print(f'[{correlation_id}] ⏭️ Empty message body, skipping')
+            print(f'[{correlation_id}] ⏭️ Empty message body and no media, skipping')
             return
+        
+        # If has media but no text, set a placeholder message
+        if not message_text and has_media:
+            message_text = "[MEDIA_UPLOADED]"
+            print(f'[{correlation_id}] 📎 Media uploaded without caption, will process media')
 
         display_text = message_text[:100] + '...' if len(message_text) > 100 else message_text
         print(f'[{correlation_id}] 💬 Message from {chat_id}: "{display_text}"')
 
-        # Generate reply using replyEngine
-        reply_text = await reply_engine.generate_reply(message_text, chat_id)
+        # Build media_info dict for forwarding to manager
+        current_media_info = None
+        if has_media and (media_data or media_url):
+            current_media_info = {
+                'url': media_url,
+                'data': media_data,
+                'mimetype': mime_type,
+                'filename': media_filename,
+                'message_id': message_id
+            }
+            print(f'[{correlation_id}] 📎 Media info prepared for forwarding')
+
+        # Generate reply using replyEngine (pass media_info for forwarding)
+        reply_text = await reply_engine.generate_reply(message_text, chat_id, current_media_info)
 
         if not reply_text:
             print(f'[{correlation_id}] ⏭️ No reply generated')

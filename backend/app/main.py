@@ -821,6 +821,91 @@ async def get_claim_history(claim_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/claims/{claim_id}/receipts")
+async def get_claim_receipts(claim_id: int):
+    """
+    Get all receipts/attachments for a specific claim
+    """
+    try:
+        from app.db import db
+        
+        # First verify claim exists
+        claim = await claim_model.find_by_id(claim_id)
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        # Fetch all receipts for this claim
+        receipts_query = """
+            SELECT id, claim_id, file_path, file_name, file_type, file_size,
+                   ocr_amount, uploaded_at
+            FROM claim_receipts
+            WHERE claim_id = $1
+            ORDER BY uploaded_at DESC
+        """
+        receipts = await db.query(receipts_query, claim_id)
+        
+        return {
+            "claim_id": claim_id,
+            "claim_number": claim.get('claim_number'),
+            "receipts": receipts,
+            "total": len(receipts)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching claim receipts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/receipts/{filename}")
+async def get_receipt_file(filename: str):
+    """
+    Serve a receipt file (image or PDF)
+    Security: Only serves files from the receipts directory
+    """
+    try:
+        from fastapi.responses import FileResponse
+        import mimetypes
+        
+        # Security: Prevent directory traversal attacks
+        if '..' in filename or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        # Define receipts directory (adjust path as needed)
+        receipts_dir = Path(__file__).parent.parent / 'receipts'
+        file_path = receipts_dir / filename
+        
+        # Check if file exists
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Receipt file not found")
+        
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(str(file_path))
+        if not content_type:
+            # Default content types for common receipt formats
+            if filename.lower().endswith('.pdf'):
+                content_type = 'application/pdf'
+            elif filename.lower().endswith(('.jpg', '.jpeg')):
+                content_type = 'image/jpeg'
+            elif filename.lower().endswith('.png'):
+                content_type = 'image/png'
+            else:
+                content_type = 'application/octet-stream'
+        
+        return FileResponse(
+            path=str(file_path),
+            media_type=content_type,
+            filename=filename
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error serving receipt file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/stats")
 async def get_stats():
     """

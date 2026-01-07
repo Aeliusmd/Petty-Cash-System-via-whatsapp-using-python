@@ -142,7 +142,13 @@ async def save_media_file(media_data: str = None, media_url: str = None,
             # Download from URL and save using httpx
             print(f"💾 Downloading from URL: {media_url[:100]}...")
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(media_url)
+                # Add WAHA API key for authentication
+                headers = {}
+                waha_api_key = os.getenv('WAHA_API_KEY')
+                if waha_api_key:
+                    headers['X-Api-Key'] = waha_api_key
+                
+                response = await client.get(media_url, headers=headers)
                 if response.status_code == 200:
                     file_bytes = response.content
                     file_size = len(file_bytes)
@@ -157,6 +163,7 @@ async def save_media_file(media_data: str = None, media_url: str = None,
         print(f"❌ Error saving file: {e}")
         import traceback
         traceback.print_exc()
+        return (None, 0)
     
     return (str(new_filename), file_size)
 
@@ -607,10 +614,19 @@ async def process_message(correlation_id: str, payload: dict, session: str):
             # Save the media file to disk
             saved_filename = None
             saved_file_size = 0
+            
+            # Fix URL for Docker networking if present
+            save_media_url = media_url
+            if media_url:
+                waha_base_url = os.getenv('WAHA_BASE_URL', 'http://waha:3000')
+                save_media_url = (media_url
+                    .replace('http://localhost:3000', waha_base_url)
+                    .replace('http://127.0.0.1:3000', waha_base_url))
+            
             try:
                 saved_filename, saved_file_size = await save_media_file(
                     media_data=media_data,
-                    media_url=media_url,
+                    media_url=save_media_url,
                     mime_type=mime_type,
                     filename=media_filename
                 )

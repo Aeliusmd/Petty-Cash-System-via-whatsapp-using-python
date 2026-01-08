@@ -279,3 +279,34 @@ async def send_media(chat_id: str, media_info: dict, caption: str = None) -> Opt
             caption=caption,
             mimetype=mimetype
         )
+
+
+async def forward_message(chat_id: str, message_id: str) -> Optional[dict]:
+    """
+    Forward a WhatsApp message to another chat
+    
+    Args:
+        chat_id: The destination chat ID
+        message_id: The message ID to forward
+        
+    Returns:
+        WAHA API response or None if failed
+    """
+    try:
+        payload = {
+            'session': WAHA_SESSION,
+            'chatId': chat_id,
+            'messageId': message_id
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f'{WAHA_BASE_URL}/api/forwardMessage',
+                json=payload,
+                headers=_get_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        print(f'❌ WAHA forwardMessage error: {e}')
+        return None

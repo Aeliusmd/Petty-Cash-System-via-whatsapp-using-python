@@ -293,10 +293,10 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         await waha_client.send_text(manager_chat_id, message)
         print(f"✅ Sent new claim notification to manager {manager['name']}")
         
-        # Send the receipt/document if available
-        if media_info:
-            caption = f"📎 Receipt for Claim #{full_claim['claim_number']}"
-            result = await waha_client.send_media(manager_chat_id, media_info, caption)
+        # Forward the receipt/document if available
+        if media_info and media_info.get('message_id'):
+            # Use WAHA's forwardMessage to forward the original receipt
+            result = await waha_client.forward_message(manager_chat_id, media_info['message_id'])
             if result:
                 print(f"✅ Forwarded receipt to manager {manager['name']}")
             else:

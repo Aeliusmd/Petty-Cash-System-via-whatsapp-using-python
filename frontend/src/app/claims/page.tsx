@@ -137,6 +137,13 @@ function ClaimsContent() {
       // Add pagination params
       params.set('limit', itemsPerPage.toString());
       params.set('offset', ((currentPage - 1) * itemsPerPage).toString());
+
+      // Filter by manager if logged in as manager
+      const userStr = localStorage.getItem('auth_user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      if (user && user.role === 'manager' && user.id) {
+        params.set('manager_id', user.id.toString());
+      }
       
       const res = await fetch(`${API_BASE_URL}/api/claims?${params}`);
       if (!res.ok) throw new Error('Failed to fetch claims');

@@ -192,8 +192,16 @@ async def notify_manager_of_appeal(claim: dict, notes: str = None) -> bool:
         full_claim = await claim_model.find_by_id(claim['id'])
         amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
         
-        # Build notes section if provided
-        notes_section = f"\n\n📝 *Staff Note:* {notes}" if notes else ""
+        # Build notes section if provided - limit to 100 chars
+        notes_section = ""
+        if notes:
+            # Skip if notes is just OCR text (starts with [RECEIPT or contains "Extracted text")
+            if not notes.startswith("[RECEIPT") and "Extracted text" not in notes:
+                short_notes = notes[:100] + "..." if len(notes) > 100 else notes
+                notes_section = f"\n📝 *Staff Note:* {short_notes}"
+        
+        # Indicate receipt will be forwarded
+        receipt_indicator = "🧾 Receipt: Attached below"
         
         message = f"""🔔 *Claim Appeal Received*
 
@@ -201,14 +209,45 @@ async def notify_manager_of_appeal(claim: dict, notes: str = None) -> bool:
 👤 Staff: {employee_name}
 📁 Category: {full_claim.get('category_name', 'N/A')}
 💵 Amount: {format_currency(amount)}
-🔄 Appeal #: {full_claim.get('appeal_count', 1)}{notes_section}
+🔄 Appeal #: {full_claim.get('appeal_count', 1)}
+{receipt_indicator}{notes_section}
 
-Reply with one of:
+━━━━━━━━━━━━━━━━━━━━
+*Reply with one of:*
 ✅ *Approve {full_claim['id']}*
-❌ *Reject {full_claim['id']} [reason]*"""
+❌ *Reject {full_claim['id']} [reason]*
+━━━━━━━━━━━━━━━━━━━━"""
 
         await waha_client.send_text(chat_id, message)
         print(f"✅ Sent appeal notification to manager {manager['name']}")
+        
+        # Forward the receipt if available
+        try:
+            print(f"🔍 Checking for receipts for claim {claim['id']}...")
+            receipts = await claim_model.get_receipts(claim['id'])
+            print(f"🔍 Found {len(receipts) if receipts else 0} receipts")
+            
+            if receipts and len(receipts) > 0:
+                receipt = receipts[0]
+                print(f"🔍 Receipt data: id={receipt.get('id')}, message_id={receipt.get('message_id')}")
+                
+                # Check if we have message_id stored
+                if receipt.get('message_id'):
+                    print(f"📤 Forwarding receipt message_id={receipt['message_id']} to {chat_id}")
+                    result = await waha_client.forward_message(chat_id, receipt['message_id'])
+                    if result:
+                        print(f"✅ Forwarded receipt to manager {manager['name']} for appeal")
+                    else:
+                        print(f"⚠️ Could not forward receipt to manager for appeal (result=None)")
+                else:
+                    print(f"⚠️ Receipt found but no message_id available for forwarding (claim was created before this feature)")
+            else:
+                print(f"⚠️ No receipts found for claim {claim['id']}")
+        except Exception as receipt_error:
+            print(f"⚠️ Could not check for receipts: {receipt_error}")
+            import traceback
+            traceback.print_exc()
+        
         return True
         
     except Exception as e:

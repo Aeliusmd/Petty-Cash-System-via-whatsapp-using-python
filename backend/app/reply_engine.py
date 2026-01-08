@@ -921,7 +921,8 @@ Or type *skip* if you don't have one."""
                             file_type=stored_media_info.get('mimetype'),
                             file_size=stored_media_info.get('saved_file_size'),
                             ocr_amount=stored_media_info.get('extracted_amount'),
-                            ocr_raw_text=stored_media_info.get('ocr_text')
+                            ocr_raw_text=stored_media_info.get('ocr_text'),
+                            message_id=stored_media_info.get('message_id')
                         )
                         print(f"✅ Receipt saved to database successfully")
                     except Exception as receipt_error:

@@ -3,6 +3,7 @@ Notification Service
 Sends WhatsApp notifications to staff for claim status updates
 """
 
+import re
 from typing import Optional
 from app import waha_client
 from app.models import employee as employee_model
@@ -221,6 +222,17 @@ async def notify_manager_of_appeal(claim: dict, notes: str = None) -> bool:
         await waha_client.send_text(chat_id, message)
         print(f"✅ Sent appeal notification to manager {manager['name']}")
         
+        # Send poll for quick action
+        await waha_client.send_poll(
+            chat_id,
+            f"Quick Action for Claim #{full_claim['id']}",
+            [
+                f"✅ Approve {full_claim['id']}",
+                f"❌ Reject {full_claim['id']}"
+            ]
+        )
+        print(f"✅ Sent approve/reject poll to manager {manager['name']}")
+        
         # Forward the receipt if available
         try:
             print(f"🔍 Checking for receipts for claim {claim['id']}...")
@@ -331,6 +343,17 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         # Send the text message first
         await waha_client.send_text(manager_chat_id, message)
         print(f"✅ Sent new claim notification to manager {manager['name']}")
+        
+        # Send poll for quick action
+        await waha_client.send_poll(
+            manager_chat_id,
+            f"Quick Action for Claim #{full_claim['id']}",
+            [
+                f"✅ Approve {full_claim['id']}",
+                f"❌ Reject {full_claim['id']}"
+            ]
+        )
+        print(f"✅ Sent approve/reject poll to manager {manager['name']}")
         
         # Forward the receipt/document if available
         if media_info and media_info.get('message_id'):

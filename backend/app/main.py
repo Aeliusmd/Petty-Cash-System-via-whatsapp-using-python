@@ -76,6 +76,22 @@ async def lifespan(app: FastAPI):
         print(f'⚠️ Database connection failed: {e}')
         print('   Run "python -m app.db.setup" to initialize the database')
     
+    # Schedule contact sync after WAHA is ready (delayed to ensure WAHA is up)
+    async def delayed_waha_setup():
+        await asyncio.sleep(10)  # Wait for WAHA to be ready
+        try:
+            # First, configure the session with NOWEB store enabled
+            print('⚙️ Configuring WAHA session with NOWEB store...')
+            await waha_client.configure_session_store()
+            
+            # Then sync contacts for LID resolution
+            print('🔄 Syncing contacts for LID resolution...')
+            await waha_client.sync_contacts()
+        except Exception as e:
+            print(f'⚠️ WAHA setup failed (will retry on first LID message): {e}')
+    
+    asyncio.create_task(delayed_waha_setup())
+    
     yield
     
     # Shutdown
@@ -224,6 +240,30 @@ async def health():
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@app.post("/api/sync-contacts")
+async def sync_contacts_endpoint():
+    """
+    Sync WhatsApp contacts to populate LID-to-phone mapping.
+    Call this after WAHA starts if LID resolution isn't working.
+    """
+    try:
+        contacts = await waha_client.sync_contacts()
+        if contacts:
+            return {
+                "success": True,
+                "message": f"Synced {len(contacts)} contacts",
+                "count": len(contacts)
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Contact sync returned no data"
+            }
+    except Exception as e:
+        print(f"❌ Contact sync error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==============================================
@@ -648,9 +688,9 @@ async def process_message(correlation_id: str, payload: dict, session: str):
             print(f'[{correlation_id}] 📎 Media info prepared for forwarding')
 
         # Generate reply using replyEngine (pass media_info for forwarding)
-        reply_text = await reply_engine.generate_reply(message_text, chat_id, current_media_info)
+        reply = await reply_engine.generate_reply(message_text, chat_id, current_media_info)
 
-        if not reply_text:
+        if not reply:
             print(f'[{correlation_id}] ⏭️ No reply generated')
             return
 
@@ -671,9 +711,38 @@ async def process_message(correlation_id: str, payload: dict, session: str):
         except:
             pass
 
-        # Send the reply
-        await waha_client.send_text(chat_id, reply_text)
-        print(f'[{correlation_id}] ✅ Reply sent: "{reply_text}"')
+        # Handle different response types from reply_engine
+        if isinstance(reply, dict):
+            reply_type = reply.get('type', 'text')
+            
+            if reply_type == 'poll':
+                # Send poll only
+                await waha_client.send_poll(
+                    chat_id,
+                    reply['poll_question'],
+                    reply['poll_options']
+                )
+                print(f'[{correlation_id}] ✅ Poll sent: "{reply["poll_question"]}"')
+                
+            elif reply_type == 'text_then_poll':
+                # Send text first, then poll
+                await waha_client.send_text(chat_id, reply['text'])
+                await asyncio.sleep(0.5)  # Brief delay between messages
+                await waha_client.send_poll(
+                    chat_id,
+                    reply['poll_question'],
+                    reply['poll_options']
+                )
+                print(f'[{correlation_id}] ✅ Text + Poll sent')
+                
+            else:
+                # Default: send text
+                await waha_client.send_text(chat_id, reply.get('text', str(reply)))
+                print(f'[{correlation_id}] ✅ Reply sent')
+        else:
+            # String response - send as text
+            await waha_client.send_text(chat_id, reply)
+            print(f'[{correlation_id}] ✅ Reply sent: "{reply[:100]}..."')
 
     except Exception as error:
         print(f'[{correlation_id}] ❌ Error processing webhook: {error}')
@@ -683,7 +752,7 @@ async def process_message(correlation_id: str, payload: dict, session: str):
 async def waha_webhook(request: Request):
     """
     WAHA Webhook Endpoint
-    Receives message events from WAHA and sends auto-replies
+    Receives message events and poll.vote events from WAHA
     """
     # Generate correlation ID for request tracking
     correlation_id = f"req_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
@@ -700,7 +769,38 @@ async def waha_webhook(request: Request):
     payload = body.get('payload')
     session = body.get('session')
 
-    # Only process incoming messages
+    # ===== HANDLE POLL VOTE EVENTS =====
+    if event == 'poll.vote':
+        if not payload:
+            print(f'[{correlation_id}] ⚠️ No payload in poll.vote event')
+            return {"received": True, "correlationId": correlation_id}
+        
+        vote_data = payload.get('vote', {})
+        chat_id = vote_data.get('from')
+        selected_options = vote_data.get('selectedOptions', [])
+        
+        # Create unique vote ID from poll message ID + chat ID + selected option
+        poll_message_id = payload.get('id') or payload.get('messageId')
+        vote_id = f"{poll_message_id}_{chat_id}_{selected_options[0] if selected_options else 'none'}"
+        
+        # Check for duplicate votes (user changing selection)
+        if is_message_processed(vote_id):
+            print(f'[{correlation_id}] ⏭️ Duplicate poll vote, ignoring: {vote_id}')
+            return {"received": True, "correlationId": correlation_id}
+        
+        if not chat_id or not selected_options:
+            print(f'[{correlation_id}] ⚠️ Missing chat_id or selectedOptions in poll.vote')
+            return {"received": True, "correlationId": correlation_id}
+        
+        # Get the first selected option (since we use multipleAnswers: false)
+        choice = selected_options[0]
+        print(f'[{correlation_id}] 🗳️ Poll vote from {chat_id}: "{choice}"')
+        
+        # Process poll vote as a regular message
+        asyncio.create_task(process_poll_vote(correlation_id, chat_id, choice))
+        return {"received": True, "correlationId": correlation_id}
+
+    # ===== HANDLE MESSAGE EVENTS =====
     if event not in ('message', 'message.any'):
         print(f'[{correlation_id}] ⏭️ Skipping non-message event: {event}')
         return {"received": True, "correlationId": correlation_id}
@@ -722,6 +822,50 @@ async def waha_webhook(request: Request):
 
     # Return 200 immediately to prevent WAHA retry storms
     return {"received": True, "correlationId": correlation_id}
+
+
+async def process_poll_vote(correlation_id: str, chat_id: str, choice: str):
+    """
+    Process a poll vote as if it were a text message
+    """
+    try:
+        print(f'[{correlation_id}] 🗳️ Processing poll vote: {choice}')
+        
+        # Generate reply using the poll choice as message text
+        reply_text = await reply_engine.generate_reply(choice, chat_id, None)
+        
+        if not reply_text:
+            print(f'[{correlation_id}] ⏭️ No reply generated for poll vote')
+            return
+        
+        # Check if reply is a dict (poll response) or string (text response)
+        if isinstance(reply_text, dict):
+            reply_type = reply_text.get('type', 'text')
+            
+            if reply_type == 'poll':
+                await waha_client.send_poll(
+                    chat_id,
+                    reply_text['poll_question'],
+                    reply_text['poll_options']
+                )
+            elif reply_type == 'text_then_poll':
+                # Send text first, then poll
+                await waha_client.send_text(chat_id, reply_text['text'])
+                await asyncio.sleep(0.5)
+                await waha_client.send_poll(
+                    chat_id,
+                    reply_text['poll_question'],
+                    reply_text['poll_options']
+                )
+            else:
+                await waha_client.send_text(chat_id, reply_text.get('text', ''))
+        else:
+            await waha_client.send_text(chat_id, reply_text)
+        
+        print(f'[{correlation_id}] ✅ Reply sent for poll vote')
+        
+    except Exception as error:
+        print(f'[{correlation_id}] ❌ Error processing poll vote: {error}')
 
 
 # App module init

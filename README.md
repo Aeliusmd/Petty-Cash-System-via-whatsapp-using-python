@@ -84,6 +84,7 @@ docker compose up --build
 ```powershell
 docker compose down
 docker compose up --build
+
 ```
 
 ### Step 4: Start Admin Panel (Frontend)
@@ -94,7 +95,7 @@ npm install
 npm run dev
 ```
 
-- **Admin Panel**: http://local9470host:3001
+- **Admin Panel**: http://localhost:3001
 - **Backend API**: http://localhost:4101
 - **WAHA Dashboard**: http://localhost:3000/dashboard/
 

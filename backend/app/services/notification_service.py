@@ -332,14 +332,28 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         await waha_client.send_text(manager_chat_id, message)
         print(f"✅ Sent new claim notification to manager {manager['name']}")
         
-        # Forward the receipt/document if available
-        if media_info and media_info.get('message_id'):
-            # Use WAHA's forwardMessage to forward the original receipt
-            result = await waha_client.forward_message(manager_chat_id, media_info['message_id'])
-            if result:
-                print(f"✅ Forwarded receipt to manager {manager['name']}")
-            else:
-                print(f"⚠️ Could not forward receipt to manager")
+        # Forward ALL receipts (supports multi-receipt)
+        if media_info:
+            # Handle both single media_info (dict) and list of media_info
+            media_list = media_info if isinstance(media_info, list) else [media_info]
+            
+            forwarded_count = 0
+            for i, media in enumerate(media_list, 1):
+                if media and media.get('message_id'):
+                    try:
+                        # Use WAHA's forwardMessage to forward the original receipt
+                        result = await waha_client.forward_message(manager_chat_id, media['message_id'])
+                        if result:
+                            forwarded_count += 1
+                            print(f"✅ Forwarded receipt #{i} to manager {manager['name']}")
+                        else:
+                            print(f"⚠️ Could not forward receipt #{i} to manager")
+                    except Exception as e:
+                        print(f"❌ Error forwarding receipt #{i}: {e}")
+            
+            if forwarded_count > 0:
+                print(f"✅ Successfully forwarded {forwarded_count}/{len(media_list)} receipt(s)")
+        
         
         return True
         

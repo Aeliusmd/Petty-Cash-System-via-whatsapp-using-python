@@ -36,8 +36,12 @@ export default function DashboardPage() {
   const { user, isAuthenticated, isAdmin, isManager } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
+    // Mark auth as checked after first render
+    setAuthChecked(true);
+
     if (!isAuthenticated) {
       router.push('/login');
       return;
@@ -66,12 +70,18 @@ export default function DashboardPage() {
     }
   }
 
-  if (loading) {
+  // Show loading while checking auth or fetching stats
+  if (!authChecked || loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
+  }
+
+  // Don't render if not authenticated (will redirect)
+  if (!isAuthenticated || (!isAdmin && !isManager)) {
+    return null;
   }
 
   if (!stats) return null;

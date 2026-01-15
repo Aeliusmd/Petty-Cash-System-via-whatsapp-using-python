@@ -447,7 +447,10 @@ Type "hi" or "menu" for more options."""
         current_step = state.get('current_step', 'initial')
         category = state.get('category')
         
-        if category and current_step not in ('initial', 'menu'):
+        # If in receipt_upload step, DON'T process here - let the dedicated multi-receipt handler below handle it
+        if current_step == 'receipt_upload':
+            pass  # Fall through to the receipt_upload handler below
+        elif category and current_step not in ('initial', 'menu'):
             await conversation_model.update(chat_id, {
                 'current_step': 'confirm',
                 'context': {
@@ -474,20 +477,21 @@ Type "hi" or "menu" for more options."""
 {location_line}
 Type *confirm* to submit or *menu* to start over."""
 
-        # If not in any flow, ask which category to use
-        await conversation_model.update(chat_id, {
-            'current_step': 'receipt_category',
-            'context': {
-                'receipt_vendor': vendor,
-                'receipt_date': date_str,
-                'user_amount': amount,
-                'extracted_text': extracted_text[:500],
-                'has_receipt': True,
-                'media_info': media_info  # Store media for forwarding to manager
-            }
-        })
-        
-        return f"""📸 *Receipt Received!*
+        # If not in any flow (and not in receipt_upload), ask which category to use
+        else:
+            await conversation_model.update(chat_id, {
+                'current_step': 'receipt_category',
+                'context': {
+                    'receipt_vendor': vendor,
+                    'receipt_date': date_str,
+                    'user_amount': amount,
+                    'extracted_text': extracted_text[:500],
+                    'has_receipt': True,
+                    'media_info': media_info  # Store media for forwarding to manager
+                }
+            })
+            
+            return f"""📸 *Receipt Received!*
 
 📝 Vendor: {vendor or 'Not detected'}
 📅 Date: {date_str or 'Not detected'}
@@ -768,19 +772,80 @@ Or type *skip* if you don't have one."""
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-📎 Please upload your receipt/invoice (image or PDF).
-Or type *skip* if you don't have one."""
+📎 Please upload receipt #1 (image or PDF).
 
-    # ===== RECEIPT UPLOAD STEP =====
+Or type:
+• *done* - if you've finished uploading
+• *skip* - to continue without receipts"""
+
+    # ===== RECEIPT UPLOAD (Modified for Multi-Receipt Support) =====
     if current_step == 'receipt_upload':
-        # Handle skip command
+        # Handle 'done' command - user has finished uploading receipts
+        if text in ('done', 'finish', 'complete'):
+            receipts = context.get('receipts', [])
+            
+            # Require at least one receipt for most categories (except maybe BATTA)
+            if not receipts and state.get('category') != 'BATTA':
+                return """⚠️ Please upload at least one receipt or type *skip* to continue without receipts."""
+            
+            # Calculate total from all receipts
+            receipt_total = sum(r.get('ocr_amount', 0) for r in receipts)
+            user_amount = context.get('total_amount') or context.get('user_amount') or 0
+            
+            # Update state to confirmation
+            await conversation_model.update(chat_id, {
+                'current_step': 'confirm',
+                'context': context
+            })
+            
+            # Build summary with all receipts
+            category_code = state.get('category')
+            summary = f"""✅ *Claim Summary*
+
+👤 Employee: {employee['name']}
+📁 Category: {category_code}
+📝 Details: {context.get('details', 'N/A')}"""
+            
+            if context.get('location_name'):
+                summary += f"\n📍 Location: {context['location_name']}"
+            if context.get('days'):
+                summary += f"\n🗓️ Days: {context['days']}"
+            
+            # Show amount
+            if user_amount:
+                summary += f"\n💵 Amount: {format_currency(user_amount)}"
+            
+            # Show receipts summary
+            if receipts:
+                summary += f"\n\n📎 *Receipts ({len(receipts)}):*"
+                for i, receipt in enumerate(receipts, 1):
+                    amount = receipt.get('ocr_amount', 0)
+                    vendor = receipt.get('vendor', 'Unknown')
+                    summary += f"\n  {i}. Rs. {amount:,.0f} - {vendor}"
+                
+                if receipt_total > 0:
+                    summary += f"\n\n🧮 *Total from receipts:* Rs. {receipt_total:,.0f}"
+                    
+                    # Validate if differs significantly from user amount
+                    if user_amount > 0:
+                        diff = abs(receipt_total - user_amount)
+                        diff_pct = (diff / user_amount) * 100
+                        
+                        if diff_pct > 5:  # More than 5% difference
+                            summary += f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
+            else:
+                summary += "\n🧾 Receipt: ⏭️ Skipped"
+            
+            summary += "\n\nType *confirm* to submit or *menu* to start over."
+            return summary
+        
+        # Handle 'skip' - skip all receipts
         if text in ('skip', 'no', 'none'):
             await conversation_model.update(chat_id, {
                 'current_step': 'confirm',
                 'context': context
             })
             
-            # Build summary based on category
             category_code = state.get('category')
             summary = f"""✅ *Claim Summary*
 
@@ -788,101 +853,104 @@ Or type *skip* if you don't have one."""
 📁 Category: {category_code}
 📝 Details: {context.get('details', 'N/A')}"""
             
-            if context.get('location_name'):
-                summary += f"\n📍 Location: {context['location_name']}"
-            if context.get('days'):
-                summary += f"\n🗓️ Days: {context['days']}"
-            if context.get('total_amount'):
-                summary += f"\n💵 Amount: {format_currency(context['total_amount'])}"
-            elif context.get('user_amount'):
-                summary += f"\n💵 Amount: {format_currency(context['user_amount'])}"
+            display_amount = context.get('total_amount') or context.get('user_amount')
+            if display_amount:
+                summary += f"\n💵 Amount: {format_currency(display_amount)}"
             
-            summary += "\n🧾 Receipt: Not provided\n\nType *confirm* to submit or *menu* to start over."
+            summary += "\n🧾 Receipt: ⏭️ Skipped"
+            summary += "\n\nType *confirm* to submit or *menu* to start over."
             return summary
         
-        # If media_info is provided (user uploaded a file), process it
+        # Handle receipt upload
         if media_info:
-            print(f"🔍 DEBUG receipt_upload: media_info present, message_text preview: {message_text[:200]}")
+            # Initialize receipts array if not exists
+            receipts = context.get('receipts', [])
+            receipt_num = len(receipts) + 1
             
-            # Try to extract information from message_text (Textract results)
+            # Extract receipt data from message_text
             extracted_amount = None
             extracted_vendor = None
             extracted_date = None
             
             if '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
-                print("✅ Found [RECEIPT/DOCUMENT UPLOADED] marker in message_text")
-                # Parse extracted text
-                if 'Extracted text:' in message_text:
-                    # Extract vendor
-                    if 'Vendor:' in message_text:
-                        vendor_part = message_text.split('Vendor:', 1)[1]
-                        extracted_vendor = vendor_part.split('\n')[0].strip()
-                        print(f"🏪 Extracted vendor: {extracted_vendor}")
-                    
-                    # Extract amount
-                    if 'Detected amount: Rs.' in message_text:
-                        amount_str = message_text.split('Detected amount: Rs.', 1)[1].split('\n')[0].strip()
-                        try:
-                            extracted_amount = float(amount_str.replace(',', ''))
-                            print(f"💰 Extracted amount: Rs.{extracted_amount}")
-                        except Exception as e:
-                            print(f"❌ Error parsing amount: {e}")
-                    
-                    # Extract date
-                    if 'Date:' in message_text:
-                        date_part = message_text.split('Date:', 1)[1]
-                        extracted_date = date_part.split('\n')[0].strip()
-                        print(f"📅 Extracted date: {extracted_date}")
-            else:
-                print("⚠️ No [RECEIPT/DOCUMENT UPLOADED] marker found in message_text")
+                print(f"🔍 DEBUG receipt_upload: Parsing receipt data from message_text")
+                
+                # Extract vendor
+                if 'Vendor:' in message_text:
+                    vendor_part = message_text.split('Vendor:', 1)[1]
+                    extracted_vendor = vendor_part.split('\n')[0].strip()
+                    print(f"🏪 Extracted vendor: {extracted_vendor}")
+                
+                # Extract amount
+                if 'Detected amount: Rs.' in message_text:
+                    amount_str = message_text.split('Detected amount: Rs.', 1)[1].split('\n')[0].strip()
+                    try:
+                        extracted_amount = float(amount_str.replace(',', ''))
+                        print(f"💰 Extracted amount: Rs.{extracted_amount}")
+                    except Exception as e:
+                        print(f"❌ Error parsing amount: {e}")
+                
+                # Extract date
+                if 'Date:' in message_text:
+                    date_part = message_text.split('Date:', 1)[1]
+                    extracted_date = date_part.split('\n')[0].strip()
+                    print(f"📅 Extracted date: {extracted_date}")
             
-            # Auto-fill amount if not already set and extracted from receipt
-            updated_context = {**context, 'media_info': media_info}
-            if extracted_amount and not context.get('user_amount') and not context.get('total_amount'):
-                updated_context['user_amount'] = extracted_amount
-                print(f"💰 Auto-filled amount from receipt: Rs.{extracted_amount}")
+            # Create receipt obj object
+            new_receipt = {
+                'file_path': media_info.get('saved_filename'),
+                'file_name': media_info.get('saved_filename'),
+                'ocr_amount': extracted_amount or 0,
+                'vendor': extracted_vendor or 'Unknown',
+                'date': extracted_date,
+                'message_id': media_info.get('message_id'),
+                'file_size': media_info.get('file_size'),
+                'mimetype': media_info.get('mimetype')
+            }
             
-            # Store media_info in context for later use
+            # Add to receipts array
+            receipts.append(new_receipt)
+            context['receipts'] = receipts
+            
+            # Calculate running total
+            receipt_total = sum(r.get('ocr_amount', 0) for r in receipts)
+            user_amount = context.get('total_amount') or context.get('user_amount') or 0
+            
+            # Update context
             await conversation_model.update(chat_id, {
-                'current_step': 'confirm',
-                'context': updated_context
+                'current_step': 'receipt_upload',
+                'context': context
             })
             
-            # Build summary
-            category_code = state.get('category')
-            summary = f"""✅ *Claim Summary*
-
-👤 Employee: {employee['name']}
-📁 Category: {category_code}
-📝 Details: {context.get('details', 'N/A')}"""
+            # Build response
+            response = f"""✅ *Receipt #{receipt_num} Saved*"""
             
-            if context.get('location_name'):
-                summary += f"\n📍 Location: {context['location_name']}"
-            if context.get('days'):
-                summary += f"\n🗓️ Days: {context['days']}"
+            if extracted_amount:
+                response += f"\n💰 Amount: Rs. {extracted_amount:,.0f}"
+            if extracted_vendor:
+                response += f"\n🏪 Vendor: {extracted_vendor}"
             
-            # Show amount (prefer extracted if available and no existing amount)
-            display_amount = context.get('total_amount') or updated_context.get('user_amount') or context.get('user_amount')
-            if display_amount:
-                summary += f"\n💵 Amount: {format_currency(display_amount)}"
-                if extracted_amount and not (context.get('user_amount') or context.get('total_amount')):
-                    summary += " (auto-detected from receipt)"
+            # Show running total
+            if user_amount > 0:
+                response += f"\n\n🧮 *Running Total:* Rs. {receipt_total:,.0f} / Rs. {user_amount:,.0f}"
+                
+                # Check if close to target
+                if abs(receipt_total - user_amount) < 1:
+                    response += " ✅"
+                elif receipt_total > user_amount:
+                    response += f" ⚠️ (Over by Rs. {receipt_total - user_amount:,.0f})"
             
-            summary += "\n🧾 Receipt: ✅ Uploaded"
-            
-            # Add extracted details if available
-            if extracted_vendor or extracted_date:
-                summary += "\n\n📋 *Receipt Details:*"
-                if extracted_vendor:
-                    summary += f"\n   Vendor: {extracted_vendor}"
-                if extracted_date:
-                    summary += f"\n   Date: {extracted_date}"
-            
-            summary += "\n\nType *confirm* to submit or *menu* to start over."
-            return summary
+            response += f"\n\n📎 Upload receipt #{receipt_num + 1} or type *done* to finish"
+            return response
         
-        # If no media and not skip, remind user
-        return """📎 Please upload your receipt (image or PDF), or type *skip* to continue without one."""
+        # If no media and not done/skip, remind user
+        receipts = context.get('receipts', [])
+        receipt_num = len(receipts) + 1
+        return f"""📎 Please upload receipt #{receipt_num} (image or PDF).
+
+Or type:
+• *done* - if you've finished uploading
+• *skip* - to continue without receipts"""
 
     # ===== CONFIRMATION =====
     if current_step == 'confirm':
@@ -907,32 +975,62 @@ Or type *skip* if you don't have one."""
                     'manager_id': employee.get('manager_id')
                 })
 
-                # Get media_info from context (if receipt was uploaded)
-                stored_media_info = context.get('media_info')
+
+                # Save ALL receipts to database (supports multi-receipt)
+                receipts = context.get('receipts', [])
+                media_info_list = []  # For manager notification
                 
-                # Save receipt to database if media was uploaded
-                if stored_media_info and stored_media_info.get('saved_filename'):
-                    try:
-                        print(f"💾 Saving receipt to database for claim {claim['id']}")
-                        await claim_model.add_receipt(
-                            claim_id=claim['id'],
-                            file_path=stored_media_info.get('saved_filename'),
-                            file_name=stored_media_info.get('saved_filename'),
-                            file_type=stored_media_info.get('mimetype'),
-                            file_size=stored_media_info.get('saved_file_size'),
-                            ocr_amount=stored_media_info.get('extracted_amount'),
-                            ocr_raw_text=stored_media_info.get('ocr_text'),
-                            message_id=stored_media_info.get('message_id')
-                        )
-                        print(f"✅ Receipt saved to database successfully")
-                    except Exception as receipt_error:
-                        print(f"⚠️ Failed to save receipt to database: {receipt_error}")
+                if receipts:
+                    print(f"💾 Saving {len(receipts)} receipt(s) to database for claim {claim['id']}")
+                    for i, receipt in enumerate(receipts, 1):
+                        try:
+                            await claim_model.add_receipt(
+                                claim_id=claim['id'],
+                                file_path=receipt.get('file_path'),
+                                file_name=receipt.get('file_name'),
+                                file_type=receipt.get('mimetype'),
+                                file_size=receipt.get('file_size'),
+                                ocr_amount=receipt.get('ocr_amount'),
+                                ocr_raw_text=None,  # Not storing full OCR text for now
+                                message_id=receipt.get('message_id')
+                            )
+                            print(f"✅ Receipt #{i} saved to database")
+                            
+                            # Build media_info for manager notification
+                            media_info_list.append({
+                                'saved_filename': receipt.get('file_path'),
+                                'message_id': receipt.get('message_id'),
+                                'mimetype': receipt.get('mimetype')
+                            })
+                        except Exception as receipt_error:
+                            print(f"⚠️ Failed to save receipt #{i}: {receipt_error}")
+                else:
+                    # Backwards compatibility: Check for old single-receipt format
+                    stored_media_info = context.get('media_info')
+                    if stored_media_info and stored_media_info.get('saved_filename'):
+                        try:
+                            print(f"💾 Saving single receipt (legacy) to database for claim {claim['id']}")
+                            await claim_model.add_receipt(
+                                claim_id=claim['id'],
+                                file_path=stored_media_info.get('saved_filename'),
+                               file_name=stored_media_info.get('saved_filename'),
+                                file_type=stored_media_info.get('mimetype'),
+                                file_size=stored_media_info.get('saved_file_size'),
+                                ocr_amount=stored_media_info.get('extracted_amount'),
+                                ocr_raw_text=stored_media_info.get('ocr_text'),
+                                message_id=stored_media_info.get('message_id')
+                            )
+                            media_info_list.append(stored_media_info)
+                            print(f"✅ Receipt saved to database successfully")
+                        except Exception as receipt_error:
+                            print(f"⚠️ Failed to save receipt to database: {receipt_error}")
+                
                 
                 # Notify manager with claim details and receipt
                 print(f"🔍 DEBUG: employee.manager_id={employee.get('manager_id')}, manager_name={employee.get('manager_name')}")
                 if employee.get('manager_id'):
                     print(f"📤 Sending notification to manager ID: {employee.get('manager_id')}")
-                    await notification_service.notify_manager_of_new_claim(claim, stored_media_info)
+                    await notification_service.notify_manager_of_new_claim(claim, media_info_list)
                 else:
                     print(f"⚠️ No manager assigned to employee {employee['name']} - skipping manager notification")
 

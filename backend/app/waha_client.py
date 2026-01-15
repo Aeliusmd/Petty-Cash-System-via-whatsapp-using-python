@@ -310,3 +310,94 @@ async def forward_message(chat_id: str, message_id: str) -> Optional[dict]:
     except Exception as e:
         print(f'❌ WAHA forwardMessage error: {e}')
         return None
+
+
+async def configure_session_store() -> Optional[dict]:
+    """
+    Configure or update the WAHA session with NOWEB store enabled.
+    This must be called to enable LID resolution with NOWEB engine.
+    
+    IMPORTANT: This will DELETE and RECREATE the session, requiring QR code re-scan.
+    
+    Returns:
+        Session configuration or None if failed
+    """
+    try:
+        session_config = {
+            "name": WAHA_SESSION,
+            "config": {
+                "noweb": {
+                    "store": {
+                        "enabled": True,
+                        "fullSync": True  # Get more message history
+                    }
+                }
+            }
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Check if session exists
+            try:
+                response = await client.get(
+                    f'{WAHA_BASE_URL}/api/sessions/{WAHA_SESSION}',
+                    headers=_get_headers()
+                )
+                session_exists = response.status_code == 200
+                
+                if session_exists:
+                    session_data = response.json()
+                    # Check if store is already enabled
+                    store_config = session_data.get('config', {}).get('noweb', {}).get('store', {})
+                    if store_config.get('enabled') == True:
+                        print(f'✅ Session "{WAHA_SESSION}" already has NOWEB store enabled')
+                        return session_data
+                    
+                    # Store not enabled - need to delete and recreate
+                    print(f'⚠️ Session "{WAHA_SESSION}" exists without store - deleting to recreate...')
+                    delete_response = await client.delete(
+                        f'{WAHA_BASE_URL}/api/sessions/{WAHA_SESSION}',
+                        headers=_get_headers()
+                    )
+                    delete_response.raise_for_status()
+                    print(f'✅ Deleted session "{WAHA_SESSION}"')
+            except httpx.HTTPStatusError:
+                # Session doesn't exist, that's fine
+                pass
+            
+            # Create new session with store enabled
+            response = await client.post(
+                f'{WAHA_BASE_URL}/api/sessions/',
+                json=session_config,
+                headers=_get_headers()
+            )
+            response.raise_for_status()
+            print(f'✅ Created session "{WAHA_SESSION}" with NOWEB store enabled')
+            print(f'📱 Please scan the QR code to authenticate WhatsApp')
+            return response.json()
+            
+    except Exception as e:
+        print(f'⚠️ WAHA configure_session_store failed: {e}')
+        return None
+
+
+async def sync_contacts() -> Optional[list]:
+    """
+    Sync contacts to populate LID-to-phone mapping in WAHA's SQLite store.
+    Call this once after WAHA starts to ensure LID resolution works.
+    
+    Returns:
+        List of contacts or None if failed
+    """
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f'{WAHA_BASE_URL}/api/contacts?session={WAHA_SESSION}',
+                headers=_get_headers()
+            )
+            response.raise_for_status()
+            contacts = response.json()
+            print(f'✅ Synced {len(contacts)} contacts for LID resolution')
+            return contacts
+    except Exception as e:
+        print(f'⚠️ WAHA sync_contacts failed: {e}')
+        return None

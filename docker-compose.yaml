@@ -31,6 +31,13 @@ services:
       - WHATSAPP_HOOK_URL=http://backend:4101/webhooks/waha
       - WHATSAPP_HOOK_EVENTS=message
       - WHATSAPP_HOOK_HMAC_KEY=supersecretkey
+      # NOWEB engine: Stable, fast, supports forwardMessage
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WAHA_LOG_FORMAT=PRETTY
+      - WHATSAPP_DOWNLOAD_MEDIA=true
+      # Store config optional now since we have manual fix, but good to keep
+      - WAHA_NOWEB_STORE_ENABLED=true
+      - WAHA_NOWEB_STORE_FULL_SYNC=true
 
     networks:
       - petty-cash-network
@@ -61,6 +68,7 @@ services:
 
     volumes:
       - ./backend/receipts:/app/backend/receipts
+      - ./backend/app:/app/app
 
     extra_hosts:
       - "host.docker.internal:host-gateway"

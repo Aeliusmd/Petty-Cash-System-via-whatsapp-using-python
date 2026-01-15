@@ -287,9 +287,31 @@ async def request_otp(request: RequestOTPRequest):
         # Generate OTP
         otp_code = await otp_model.generate_otp(phone_number)
         
-        # Send OTP via WhatsApp
+        # Get Chat ID or derive from phone number
         chat_id = employee.get('whatsapp_chat_id')
+        
+        # If no chat_id in DB, generate one from phone number
+        if not chat_id:
+            # Normalize phone for chat ID (Sri Lanka specific)
+            # Remove non-digits
+            digits = re.sub(r'\D', '', phone_number)
+            
+            # Handle leading 0 (077... -> 77...)
+            if digits.startswith('0') and len(digits) >= 10:
+                digits = digits[1:]
+                
+            # Handle country code (77... -> 9477...)
+            if not digits.startswith('94') and len(digits) == 9:
+                digits = '94' + digits
+                
+            chat_id = f"{digits}@c.us"
+            print(f"⚠️ No stored chat ID, derived: {chat_id}")
+
         if chat_id:
+            # Ensure proper format (suffix)
+            if not chat_id.endswith('@c.us') and not chat_id.endswith('@lid'):
+                chat_id = f"{chat_id}@c.us"
+
             message = f"""🔐 *Login Verification Code*
 
 Your OTP code is: *{otp_code}*
@@ -297,10 +319,11 @@ Your OTP code is: *{otp_code}*
 This code will expire in 5 minutes.
 
 Do not share this code with anyone."""
+            # Send message
             await waha_client.send_text(chat_id, message)
-            print(f"✅ Sent OTP {otp_code} to {employee['name']}")
+            print(f"✅ Sent OTP {otp_code} to {employee['name']} ({chat_id})")
         else:
-            print(f"⚠️ No WhatsApp chat ID for {employee['name']}, OTP: {otp_code}")
+            print(f"⚠️ Could not generate chat ID for {employee['name']}")
         
         return {
             "message": "OTP sent successfully",
@@ -435,6 +458,16 @@ async def process_message(correlation_id: str, payload: dict, session: str):
                 print(f'[{correlation_id}] 📱 Found phone in sender: {sender_id}')
                 chat_id = sender_id
 
+        # FALLBACK: Check remoteJidAlt (specific to NOWEB engine with LID)
+        # _data.key.remoteJidAlt often contains the real phone number: "94725699717@s.whatsapp.net"
+        if not chat_id or '@lid' in chat_id:
+            remote_jid_alt = payload.get('_data', {}).get('key', {}).get('remoteJidAlt')
+            if remote_jid_alt and '@s.whatsapp.net' in remote_jid_alt:
+                # Convert 123456789@s.whatsapp.net -> 123456789@c.us
+                alt_chat_id = remote_jid_alt.replace('@s.whatsapp.net', '@c.us')
+                print(f'[{correlation_id}] 📱 Found phone in remoteJidAlt: {alt_chat_id}')
+                chat_id = alt_chat_id
+
         if not chat_id:
             print(f'[{correlation_id}] ⚠️ No chatId found in payload')
             return
@@ -444,7 +477,13 @@ async def process_message(correlation_id: str, payload: dict, session: str):
         print(f'[{correlation_id}] 🔍 DEBUG: has_media={has_media}')
         
         media_type = payload.get('type') or payload.get('messageType') or (payload.get('_data') or {}).get('type')
-        mime_type = payload.get('mimetype') or (payload.get('_data') or {}).get('mimetype', '') or ''
+        # Extract mimetype - NOWEB puts it in payload.media.mimetype
+        mime_type = (
+            payload.get('mimetype') or 
+            (payload.get('media') or {}).get('mimetype') or
+            (payload.get('_data') or {}).get('mimetype', '') or 
+            ''
+        )
 
         # Media data from WAHA - use (x or {}) pattern to handle None values
         media_obj = payload.get('media') or {}
@@ -710,12 +749,20 @@ async def waha_webhook(request: Request):
         print(f'[{correlation_id}] 🔍 DEBUG: Full body keys: {list(body.keys())}')
         return {"received": True, "correlationId": correlation_id}
 
-    # Deduplicate messages
+    # Deduplicate messages - BUT allow media messages through even if ID was seen
+    # (WAHA sends 2 webhooks for media: one without data while downloading, one with data after)
     message_id = payload.get('id') or (payload.get('_data', {}).get('id', {}).get('id'))
-    print(f'[{correlation_id}] 🔍 DEBUG: message_id={message_id}, fromMe={payload.get("fromMe")}')
+    has_media = payload.get('hasMedia') or payload.get('media') or (payload.get('_data') or {}).get('media')
+    
+    print(f'[{correlation_id}] 🔍 DEBUG: message_id={message_id}, fromMe={payload.get("fromMe")}, hasMedia={bool(has_media)}')
+    
     if is_message_processed(message_id):
-        print(f'[{correlation_id}] ⏭️ Duplicate message, skipping: {message_id}')
-        return {"received": True, "correlationId": correlation_id}
+        # If this is a media message, allow it through (might be the second webhook with media data)
+        if has_media:
+            print(f'[{correlation_id}] 📎 Allowing duplicate media message through (has media data)')
+        else:
+            print(f'[{correlation_id}] ⏭️ Duplicate message, skipping: {message_id}')
+            return {"received": True, "correlationId": correlation_id}
 
     # Process message asynchronously using asyncio.create_task (more reliable than BackgroundTasks)
     asyncio.create_task(process_message(correlation_id, payload, session))
@@ -1313,6 +1360,96 @@ async def delete_inactive_employees():
         }
     except Exception as e:
         print(f"❌ Error deleting inactive employees: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================
+# UNITS / ORGANIZATIONS API
+# =============================================
+
+@app.get("/api/units")
+async def get_units(request: Request):
+    """Get all active units/organizations"""
+    try:
+        from app.models import unit as unit_model
+        units = await unit_model.find_all()
+        return {"units": units}
+    except Exception as e:
+        print(f"❌ Error fetching units: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/units/{unit_id}")
+async def get_unit(unit_id: int, request: Request):
+    """Get unit by ID"""
+    try:
+        from app.models import unit as unit_model
+        unit = await unit_model.find_by_id(unit_id)
+        if not unit:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        return unit
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CreateUnitRequest(BaseModel):
+    code: str
+    name: str
+    is_active: Optional[bool] = True
+
+
+@app.post("/api/units")
+async def create_unit(request: CreateUnitRequest):
+    """Create new unit (admin only)"""
+    try:
+        from app.models import unit as unit_model
+        unit = await unit_model.create(request.model_dump())
+        return unit
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpdateUnitRequest(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@app.put("/api/units/{unit_id}")
+async def update_unit(unit_id: int, request: UpdateUnitRequest):
+    """Update unit (admin only)"""
+    try:
+        from app.models import unit as unit_model
+        unit = await unit_model.update(unit_id, request.model_dump(exclude_unset=True))
+        if not unit:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        return unit
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/units/{unit_id}")
+async def delete_unit(unit_id: int):
+    """Delete unit (admin only)"""
+    try:
+        from app.models import unit as unit_model
+        success = await unit_model.delete(unit_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        return {"message": "Unit deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting unit: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

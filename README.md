@@ -84,6 +84,7 @@ docker compose up --build
 ```powershell
 docker compose down
 docker compose up --build
+
 ```
 
 ### Step 4: Start Admin Panel (Frontend)

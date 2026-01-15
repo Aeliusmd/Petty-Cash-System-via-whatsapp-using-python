@@ -182,6 +182,8 @@ async def generate_reply(message_text: str, chat_id: str, media_info: dict = Non
         except:
             context = {}
 
+    # Get current conversation step
+    current_step = state.get('current_step', 'initial')
     # ===== HANDLE LOCATION SHARED =====
     if '[LOCATION_SHARED]' in message_text:
         match = re.search(r'lat:([0-9.-]+) lon:([0-9.-]+)', message_text)
@@ -277,11 +279,26 @@ The employee has been notified."""
         claim_id = int(reject_match.group(1))
         reason = reject_match.group(2).strip() if reject_match.group(2) else None
         
-        # If no reason provided, ask for it
+        # If no reason provided, save claim ID and ask for reason via poll
         if not reason or len(reason) < 3:
-            return f"""❌ Please provide a rejection reason.
-
-Example: *Reject {claim_id} Invalid receipt* or *Reject {claim_id} Missing details*"""
+            # Store pending rejection in conversation context
+            await conversation_model.update(chat_id, {
+                'current_step': 'pending_rejection',
+                'context': {'pending_claim_id': claim_id}
+            })
+            
+            return {
+                'type': 'text_then_poll',
+                'text': f'❌ *Rejecting Claim #{claim_id}*\n\nPlease select or type a rejection reason:',
+                'poll_question': 'Select rejection reason:',
+                'poll_options': [
+                    '📝 Invalid or unclear receipt',
+                    '💵 Amount exceeds limit',
+                    '📋 Missing information',
+                    '🔄 Duplicate claim',
+                    '✏️ Other (type your reason)'
+                ]
+            }
         
         try:
             # Find the claim
@@ -320,27 +337,107 @@ The employee has been notified and can appeal."""
             print(f"❌ Error rejecting claim via WhatsApp: {e}")
             return f"❌ Error rejecting claim. Please try again."
     
+    # ===== HANDLE PENDING REJECTION (from poll selection) =====
+    if current_step == 'pending_rejection':
+        pending_claim_id = context.get('pending_claim_id')
+        
+        if not pending_claim_id:
+            await conversation_model.reset(chat_id)
+            return "❌ Session expired. Please try again."
+        
+        # Handle "Other" option - ask for typed reason
+        if '✏️' in message_text or 'other' in text.lower():
+            return f"Please type your rejection reason for Claim #{pending_claim_id}:"
+        
+        # Map poll options to rejection reasons
+        reason = None
+        if '📝' in message_text or 'invalid' in text.lower() or 'unclear' in text.lower():
+            reason = "Invalid or unclear receipt"
+        elif '💵' in message_text or 'exceeds' in text.lower() or 'limit' in text.lower():
+            reason = "Amount exceeds limit"
+        elif '📋' in message_text or 'missing' in text.lower():
+            reason = "Missing information"
+        elif '🔄' in message_text or 'duplicate' in text.lower():
+            reason = "Duplicate claim"
+        else:
+            # Use the typed text as the reason
+            reason = message_text if len(message_text) >= 3 else None
+        
+        if not reason:
+            return {
+                'type': 'poll',
+                'poll_question': 'Select rejection reason:',
+                'poll_options': [
+                    '📝 Invalid or unclear receipt',
+                    '💵 Amount exceeds limit',
+                    '📋 Missing information',
+                    '🔄 Duplicate claim',
+                    '✏️ Other (type your reason)'
+                ]
+            }
+        
+        try:
+            # Find and reject the claim
+            claim = await claim_model.find_by_id(pending_claim_id)
+            if not claim:
+                await conversation_model.reset(chat_id)
+                return f"❌ Claim #{pending_claim_id} not found."
+            
+            # Verify authorization
+            if claim.get('manager_id') != employee['id']:
+                await conversation_model.reset(chat_id)
+                return f"❌ You are not authorized to reject this claim."
+            
+            # Check status
+            current_status = claim.get('status_code')
+            if current_status not in ('PENDING', 'APPEALED'):
+                await conversation_model.reset(chat_id)
+                return f"❌ Claim #{pending_claim_id} is already {claim.get('status_name')}."
+            
+            # Record status change and reject
+            await claim_model.record_status_change(
+                pending_claim_id, current_status, 'REJECTED', employee['id'], reason
+            )
+            await claim_model.reject(pending_claim_id, employee['id'], reason)
+            
+            # Notify the employee
+            await notification_service.notify_staff_of_rejection(claim, reason)
+            
+            # Reset conversation
+            await conversation_model.reset(chat_id)
+            
+            return f"""❌ *Claim Rejected*
 
+📋 Claim #: *{claim['claim_number']}*
+👤 Staff: {claim.get('employee_name', 'N/A')}
+📝 Reason: {reason}
 
-    # ===== HANDLE GREETINGS - SHOW MAIN MENU =====
-    if text in ('hi', 'hello', 'hey', 'menu', 'start'):
+The employee has been notified and can appeal."""
+        except Exception as e:
+            print(f"❌ Error rejecting claim during pending_rejection: {e}")
+            await conversation_model.reset(chat_id)
+            return f"❌ Error rejecting claim. Please try again."
+
+    # ===== HANDLE GREETINGS - SHOW MAIN MENU (POLL) =====
+    # Only show menu poll for exact "hi" or "menu" commands (case-insensitive)
+    if text in ('hi', 'menu'):
         await conversation_model.update(chat_id, {
             'current_step': 'menu',
             'category': None,
             'context': {}
         })
         
-        return f"""🙏 Welcome, *{employee['name']}*!
-
-You are registered as Grade {employee.get('grade_code') or 'N/A'} at {employee.get('location_name') or 'N/A'}.
-
-Please select a category:
-1️⃣ Batta (Daily Allowance)
-2️⃣ Fuel Expenses
-3️⃣ Accommodation
-4️⃣ Sundry Expenses
-
-Reply with the number or category name."""
+        # Return poll for main menu
+        return {
+            'type': 'poll',
+            'poll_question': f"🙏 Welcome, {employee['name']}! How can we help you today?",
+            'poll_options': [
+                "📍 Batta (Daily Allowance)",
+                "⛽ Fuel Expenses",
+                "🏨 Accommodation",
+                "📦 Sundry Expenses"
+            ]
+        }
 
     # ===== HANDLE APPEAL COMMAND =====
     if text == 'appeal':
@@ -477,6 +574,7 @@ Type "hi" or "menu" for more options."""
 {location_line}
 Type *confirm* to submit or *menu* to start over."""
 
+<<<<<<< HEAD
         # If not in any flow (and not in receipt_upload), ask which category to use
         else:
             await conversation_model.update(chat_id, {
@@ -492,23 +590,46 @@ Type *confirm* to submit or *menu* to start over."""
             })
             
             return f"""📸 *Receipt Received!*
+=======
+        # If not in any flow, ask which category to use (via poll)
+        await conversation_model.update(chat_id, {
+            'current_step': 'receipt_category',
+            'context': {
+                'receipt_vendor': vendor,
+                'receipt_date': date_str,
+                'user_amount': amount,
+                'extracted_text': extracted_text[:500],
+                'has_receipt': True,
+                'media_info': media_info  # Store media for forwarding to manager
+            }
+        })
+        
+        # First send the receipt info as text
+        receipt_info = f"""📸 *Receipt Received!*
+>>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
 
 📝 Vendor: {vendor or 'Not detected'}
 📅 Date: {date_str or 'Not detected'}
-💰 Amount: {format_currency(amount) if amount else 'Not detected'}
+💰 Amount: {format_currency(amount) if amount else 'Not detected'}"""
+        
+        # Return poll for category selection
+        return {
+            'type': 'text_then_poll',
+            'text': receipt_info,
+            'poll_question': 'Which category is this receipt for?',
+            'poll_options': [
+                '⛽ Fuel Expenses',
+                '🏨 Accommodation',
+                '📦 Sundry Expenses'
+            ]
+        }
 
-Which category is this receipt for?
-2️⃣ Fuel Expenses
-3️⃣ Accommodation
-4️⃣ Sundry Expenses
-
-Reply with the number."""
-
-    # Handle receipt category selection
+    # Handle receipt category selection (from poll or text)
     if state.get('current_step') == 'receipt_category':
         category = None
         category_name = ''
         
+        # Match poll options or text input
         if text == '2' or 'fuel' in text:
             category = 'FUEL'
             category_name = 'Fuel Expense'
@@ -520,15 +641,15 @@ Reply with the number."""
             category_name = 'Sundry Expense'
         
         if not category:
-            return """❌ *Invalid Selection*
-
-Please select a valid category:
-
-2️⃣ *Fuel Expenses*
-3️⃣ *Accommodation*
-4️⃣ *Sundry Expenses*
-
-Reply with the number (2, 3, or 4)."""
+            return {
+                'type': 'poll',
+                'poll_question': 'Please select a valid category:',
+                'poll_options': [
+                    '⛽ Fuel Expenses',
+                    '🏨 Accommodation', 
+                    '📦 Sundry Expenses'
+                ]
+            }
         
         await conversation_model.update(chat_id, {
             'current_step': 'confirm',
@@ -546,36 +667,14 @@ Reply with the number (2, 3, or 4)."""
 
 Type *confirm* to submit or *menu* to start over."""
 
-    # Handle greetings - show main menu
-    if text in ('hi', 'hello', 'hey', 'menu', 'start'):
-        await conversation_model.update(chat_id, {
-            'current_step': 'menu',
-            'category': None,
-            'context': {}
-        })
-        
-        grade = employee.get('grade_code', 'N/A')
-        location = employee.get('location_name', 'N/A')
-        
-        return f"""🙏 Welcome, *{employee['name']}*!
+    # NOTE: Main menu greeting is handled earlier (line ~325) with poll response
 
-You are registered as Grade {grade} at {location}.
-
-Please select a category:
-1️⃣ Batta (Daily Allowance)
-2️⃣ Fuel Expenses
-3️⃣ Accommodation
-4️⃣ Sundry Expenses
-
-Reply with the number or category name."""
-
-    # Handle category selection from menu
+    # Handle category selection from menu (poll options or text)
     current_step = state.get('current_step', 'initial')
     if current_step in ('menu', 'initial'):
-        # Batta
-        if text == '1' or 'batta' in text or 'daily' in text:
+        # Batta - match poll option "📍 Batta (Daily Allowance)" or text
+        if text == '1' or 'batta' in text or 'daily' in text or '📍' in message_text:
             locations = await rates_model.get_all_locations()
-            location_list = '\n'.join(f"• {loc['name']}" for loc in locations)
             
             await conversation_model.update(chat_id, {
                 'current_step': 'batta_location',
@@ -583,15 +682,17 @@ Reply with the number or category name."""
                 'context': {}
             })
             
-            return f"""📍 *Batta Claim*
+            # Create poll options from locations (max 12 options for WhatsApp)
+            location_options = [f"📍 {loc['name']}" for loc in locations[:12]]
+            
+            return {
+                'type': 'text_then_poll',
+                'text': '📍 *Batta Claim*\n\nPlease select your travel destination:',
+                'poll_question': 'Select Location',
+                'poll_options': location_options
+            }
 
-Please enter the *location* for your travel:
-
-{location_list}
-
-Example: "Kandy" or "Colombo\""""
-
-        # Fuel
+        # Fuel - match poll option "⛽ Fuel Expenses" or text
         if text == '2' or 'fuel' in text or 'petrol' in text or 'diesel' in text:
             await conversation_model.update(chat_id, {
                 'current_step': 'fuel_details',
@@ -667,12 +768,19 @@ Example: "Colombo", "Kandy", "Galle", etc."""
             }
         })
 
-        return f"""📍 Location: *{location['name']}*
-💰 Rate: *{format_currency(rate)}/day* (Grade {employee.get('grade_code')})
-
-How many days?"""
+        return {
+            'type': 'text_then_poll',
+            'text': f"📍 Location: *{location['name']}*\n💰 Rate: *{format_currency(rate)}/day* (Grade {employee.get('grade_code')})",
+            'poll_question': 'How many days?',
+            'poll_options': ['1 day', '2 days', '3 days', '5 days', '7 days', '🔢 Other (type number)']
+        }
 
     if current_step == 'batta_days':
+        # Handle "Other (type number)" selection from poll
+        if '🔢' in message_text or 'other' in text.lower():
+            return "Please type the number of days (1-30):"
+        
+        # Extract days from poll selection or typed input
         days = extract_days(text)
         if not days:
             try:
@@ -695,16 +803,18 @@ How many days?"""
             }
         })
 
-        return f"""✅ *Batta Claim Details*
+        return {
+            'type': 'text_then_poll',
+            'text': f"""✅ *Batta Claim Details*
 
 👤 Employee: {employee['name']}
 📍 Location: {context.get('location_name')}
 🗓️ Days: {days}
 💰 Rate: {format_currency(rate_per_day)}/day
-💵 *Total: {format_currency(total_amount)}*
-
-📎 Please upload your receipt/supporting document (image or PDF).
-Or type *skip* if you don't have one."""
+💵 *Total: {format_currency(total_amount)}*""",
+            'poll_question': 'Do you have a receipt?',
+            'poll_options': ['📎 Upload Receipt', '⏭️ Skip (No receipt)']
+        }
 
     # ===== FUEL FLOW =====
     if current_step == 'fuel_details':
@@ -720,13 +830,15 @@ Or type *skip* if you don't have one."""
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Fuel Expense Details*
+        return {
+            'type': 'text_then_poll',
+            'text': f"""✅ *Fuel Expense Details*
 
 👤 Employee: {employee['name']}
-📝 Details: {message_text}{amount_line}
-
-📎 Please upload your fuel receipt (image or PDF).
-Or type *skip* if you don't have one."""
+📝 Details: {message_text}{amount_line}""",
+            'poll_question': 'Do you have a receipt?',
+            'poll_options': ['📎 Upload Receipt', '⏭️ Skip (No receipt)']
+        }
 
     # ===== ACCOMMODATION FLOW =====
     if current_step == 'accommodation_details':
@@ -745,13 +857,15 @@ Or type *skip* if you don't have one."""
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Accommodation Claim Details*
+        return {
+            'type': 'text_then_poll',
+            'text': f"""✅ *Accommodation Claim Details*
 
 👤 Employee: {employee['name']}
-📝 Details: {message_text}{amount_line}
-
-📎 Please upload your hotel bill/invoice (image or PDF).
-Or type *skip* if you don't have one."""
+📝 Details: {message_text}{amount_line}""",
+            'poll_question': 'Do you have a receipt?',
+            'poll_options': ['📎 Upload Receipt', '⏭️ Skip (No receipt)']
+        }
 
     # ===== SUNDRY FLOW =====
     if current_step == 'sundry_details':
@@ -767,12 +881,21 @@ Or type *skip* if you don't have one."""
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Sundry Expense Details*
+        return {
+            'type': 'text_then_poll',
+            'text': f"""✅ *Sundry Expense Details*
 
 👤 Employee: {employee['name']}
+<<<<<<< HEAD
 📝 Details: {message_text}{amount_line}
 
 📎 Please upload receipt #1 (image or PDF).
+=======
+📝 Details: {message_text}{amount_line}""",
+            'poll_question': 'Do you have a receipt?',
+            'poll_options': ['📎 Upload Receipt', '⏭️ Skip (No receipt)']
+        }
+>>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
 
 Or type:
 • *done* - if you've finished uploading
@@ -780,6 +903,7 @@ Or type:
 
     # ===== RECEIPT UPLOAD (Modified for Multi-Receipt Support) =====
     if current_step == 'receipt_upload':
+<<<<<<< HEAD
         # Handle 'done' command - user has finished uploading receipts
         if text in ('done', 'finish', 'complete'):
             receipts = context.get('receipts', [])
@@ -841,6 +965,10 @@ Or type:
         
         # Handle 'skip' - skip all receipts
         if text in ('skip', 'no', 'none'):
+=======
+        # Handle skip command (from poll or text)
+        if text in ('skip', 'no', 'none') or '⏭️' in message_text or 'skip' in text.lower():
+>>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
             await conversation_model.update(chat_id, {
                 'current_step': 'confirm',
                 'context': context
@@ -857,9 +985,20 @@ Or type:
             if display_amount:
                 summary += f"\n💵 Amount: {format_currency(display_amount)}"
             
+<<<<<<< HEAD
             summary += "\n🧾 Receipt: ⏭️ Skipped"
             summary += "\n\nType *confirm* to submit or *menu* to start over."
             return summary
+=======
+            summary += "\n🧲 Receipt: Not provided"
+            
+            return {
+                'type': 'text_then_poll',
+                'text': summary,
+                'poll_question': 'Ready to submit?',
+                'poll_options': ['✅ Confirm & Submit', '❌ Cancel', '📝 Start Over']
+            }
+>>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
         
         # Handle receipt upload
         if media_info:
@@ -940,6 +1079,7 @@ Or type:
                 elif receipt_total > user_amount:
                     response += f" ⚠️ (Over by Rs. {receipt_total - user_amount:,.0f})"
             
+<<<<<<< HEAD
             response += f"\n\n📎 Upload receipt #{receipt_num + 1} or type *done* to finish"
             return response
         
@@ -951,10 +1091,40 @@ Or type:
 Or type:
 • *done* - if you've finished uploading
 • *skip* - to continue without receipts"""
+=======
+            summary += "\n🧲 Receipt: ✅ Uploaded"
+            
+            # Add extracted details if available
+            if extracted_vendor or extracted_date:
+                summary += "\n\n📋 *Receipt Details:*"
+                if extracted_vendor:
+                    summary += f"\n   Vendor: {extracted_vendor}"
+                if extracted_date:
+                    summary += f"\n   Date: {extracted_date}"
+            
+            return {
+                'type': 'text_then_poll',
+                'text': summary,
+                'poll_question': 'Ready to submit?',
+                'poll_options': ['✅ Confirm & Submit', '❌ Cancel', '📝 Start Over']
+            }
+        
+        # Handle "Upload Receipt" poll selection - prompt for upload
+        if '📎' in message_text or 'upload' in text.lower():
+            return "📎 *Please send your receipt now*\n\n📷 Take a photo or send an existing image/PDF of your receipt."
+        
+        # If no media and not skip, remind user with poll
+        return {
+            'type': 'poll',
+            'poll_question': 'Do you have a receipt?',
+            'poll_options': ['📎 Upload Receipt', '⏭️ Skip (No receipt)']
+        }
+>>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
 
     # ===== CONFIRMATION =====
     if current_step == 'confirm':
-        if text in ('confirm', 'yes', 'submit'):
+        # Handle poll response or text confirmation
+        if text in ('confirm', 'yes', 'submit') or '✅' in message_text or 'confirm' in text.lower():
             try:
                 # Get category ID
                 category_code = state.get('category')
@@ -1056,13 +1226,61 @@ Type "menu" to submit another claim."""
                 print(f'❌ Error creating claim: {e}')
                 return '❌ Error saving claim. Please try again or contact admin.'
 
-    # Handle cancel/reset
-    if text in ('cancel', 'reset', 'exit'):
+    # Handle cancel/reset (from poll or text)
+    if text in ('cancel', 'reset', 'exit') or '❌' in message_text or 'cancel' in text.lower():
         await conversation_model.reset(chat_id)
-        return '❌ Cancelled. Type "hi" or "menu" to start again.'
+        return {
+            'type': 'text_then_poll',
+            'text': '❌ Cancelled.',
+            'poll_question': 'How can we help you?',
+            'poll_options': [
+                '📍 Batta (Daily Allowance)',
+                '⛽ Fuel Expenses',
+                '🏨 Accommodation',
+                '📦 Sundry Expenses'
+            ]
+        }
+    
+    # Handle "Start Over" from poll
+    if '📝' in message_text or 'start over' in text.lower():
+        await conversation_model.reset(chat_id)
+        return {
+            'type': 'poll',
+            'poll_question': f'🙏 Welcome back, {employee["name"]}! How can we help you?',
+            'poll_options': [
+                '📍 Batta (Daily Allowance)',
+                '⛽ Fuel Expenses',
+                '🏨 Accommodation',
+                '📦 Sundry Expenses'
+            ]
+        }
 
-    # Default response
-    return """🤔 I didn't understand that.
+    # Default response - behavior depends on current state
+    # In initial/menu state: simple text message telling user to send "hi" or "menu"
+    # In active claim flow: show poll menu to help user continue
+    
+    # Active claim steps that indicate user is in the middle of submitting a claim
+    active_steps = [
+        'batta_location', 'batta_days', 'fuel_details', 'accommodation_details', 
+        'sundry_details', 'receipt_upload', 'receipt_category', 'confirm',
+        'appeal_notes', 'pending_rejection'
+    ]
+    
+    if current_step in active_steps:
+        # User is in a claim flow but sent something unexpected - show poll menu to help
+        return {
+            'type': 'text_then_poll',
+            'text': '🤔 I didn\'t understand that.',
+            'poll_question': 'How can we help you?',
+            'poll_options': [
+                '📍 Batta (Daily Allowance)',
+                '⛽ Fuel Expenses',
+                '🏨 Accommodation',
+                '📦 Sundry Expenses'
+            ]
+        }
+    else:
+        # User is in initial/menu state - just tell them to send "hi" or "menu"
+        return """🤔 I didn't understand that.
 
-Type "hi" or "menu" to see available options, or select:
-1️⃣ Batta | 2️⃣ Fuel | 3️⃣ Accommodation | 4️⃣ Sundry"""
+Please send *"hi"* or *"menu"* to get started."""

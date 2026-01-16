@@ -31,7 +31,7 @@ export default function OrganizationsPage() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setUnits(data.units);
+      setUnits(data.units || data || []);
     } catch (error) {
       console.error('Error fetching units:', error);
     } finally {

@@ -3,7 +3,6 @@ Notification Service
 Sends WhatsApp notifications to staff for claim status updates
 """
 
-import re
 from typing import Optional
 from app import waha_client
 from app.models import employee as employee_model
@@ -222,17 +221,6 @@ async def notify_manager_of_appeal(claim: dict, notes: str = None) -> bool:
         await waha_client.send_text(chat_id, message)
         print(f"✅ Sent appeal notification to manager {manager['name']}")
         
-        # Send poll for quick action
-        await waha_client.send_poll(
-            chat_id,
-            f"Quick Action for Claim #{full_claim['id']}",
-            [
-                f"✅ Approve {full_claim['id']}",
-                f"❌ Reject {full_claim['id']}"
-            ]
-        )
-        print(f"✅ Sent approve/reject poll to manager {manager['name']}")
-        
         # Forward the receipt if available
         try:
             print(f"🔍 Checking for receipts for claim {claim['id']}...")
@@ -344,7 +332,6 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         await waha_client.send_text(manager_chat_id, message)
         print(f"✅ Sent new claim notification to manager {manager['name']}")
         
-<<<<<<< HEAD
         # Forward ALL receipts (supports multi-receipt)
         if media_info:
             # Handle both single media_info (dict) and list of media_info
@@ -367,27 +354,6 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
             if forwarded_count > 0:
                 print(f"✅ Successfully forwarded {forwarded_count}/{len(media_list)} receipt(s)")
         
-=======
-        # Send poll for quick action
-        await waha_client.send_poll(
-            manager_chat_id,
-            f"Quick Action for Claim #{full_claim['id']}",
-            [
-                f"✅ Approve {full_claim['id']}",
-                f"❌ Reject {full_claim['id']}"
-            ]
-        )
-        print(f"✅ Sent approve/reject poll to manager {manager['name']}")
-        
-        # Forward the receipt/document if available
-        if media_info and media_info.get('message_id'):
-            # Use WAHA's forwardMessage to forward the original receipt
-            result = await waha_client.forward_message(manager_chat_id, media_info['message_id'])
-            if result:
-                print(f"✅ Forwarded receipt to manager {manager['name']}")
-            else:
-                print(f"⚠️ Could not forward receipt to manager")
->>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
         
         return True
         

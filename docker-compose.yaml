@@ -8,9 +8,8 @@ services:
     image: devlikeapro/waha:latest
 
     dns:
-      - 8.8.8.8
-      - 8.8.4.4
       - 1.1.1.1
+      - 8.8.8.8
 
     logging:
       driver: "json-file"
@@ -30,9 +29,8 @@ services:
 
     environment:
       - WHATSAPP_HOOK_URL=http://backend:4101/webhooks/waha
-      - WHATSAPP_HOOK_EVENTS=message,poll.vote
+      - WHATSAPP_HOOK_EVENTS=message
       - WHATSAPP_HOOK_HMAC_KEY=supersecretkey
-<<<<<<< HEAD
       # NOWEB engine: Stable, fast, supports forwardMessage
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
       - WAHA_LOG_FORMAT=PRETTY
@@ -40,11 +38,6 @@ services:
       # Store config optional now since we have manual fix, but good to keep
       - WAHA_NOWEB_STORE_ENABLED=true
       - WAHA_NOWEB_STORE_FULL_SYNC=true
-=======
-      - WHATSAPP_DEFAULT_ENGINE=GOWS
-      - WAHA_LOG_FORMAT=PRETTY
-      - WAHA_SQLITE_STORE_ENABLED=True
->>>>>>> aacf1863e4ef6646015f74e4c5ec2a4032cc330f
 
     networks:
       - petty-cash-network

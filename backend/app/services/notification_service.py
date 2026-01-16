@@ -309,9 +309,28 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         full_claim = await claim_model.find_by_id(claim['id'])
         amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
         
-        # Build the notification message
-        has_receipt = "🧾 Receipt: Attached below" if media_info else "🧾 Receipt: Not provided"
+        # Get receipts from database to show detailed breakdown
+        receipts_from_db = await claim_model.get_receipts(claim['id'])
         
+        # Build receipt details section
+        receipt_section = ""
+        if receipts_from_db and len(receipts_from_db) > 0:
+            receipt_section = f"\n\n📎 *Receipts ({len(receipts_from_db)}):*"
+            total_from_receipts = 0
+            for i, receipt in enumerate(receipts_from_db, 1):
+                receipt_amount = receipt.get('ocr_amount', 0)
+                vendor = receipt.get('vendor') or 'Unknown'
+                receipt_section += f"\n  {i}. Rs. {receipt_amount:,.0f} - {vendor}"
+                total_from_receipts += receipt_amount
+            
+            if total_from_receipts > 0:
+                receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
+            
+            receipt_section += "\n\n🧾 Receipt files: Attached below"
+        else:
+            receipt_section = "\n\n🧾 Receipt: Not provided"
+        
+        # Build the notification message
         message = f"""🔔 *New Claim Submitted*
 
 📋 Claim #: *{full_claim['claim_number']}*
@@ -319,8 +338,7 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
 📁 Category: {full_claim.get('category_name', 'N/A')}
 📍 Location: {full_claim.get('location_name', 'N/A')}
 💵 Amount: {format_currency(amount)}
-📝 Details: {full_claim.get('description', 'N/A')[:100]}
-{has_receipt}
+📝 Details: {full_claim.get('description', 'N/A')[:100]}{receipt_section}
 
 ━━━━━━━━━━━━━━━━━━━━
 *Reply with one of:*

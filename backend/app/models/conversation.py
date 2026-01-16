@@ -84,6 +84,31 @@ async def get_with_employee(chat_id: str) -> Optional[dict]:
     return result[0] if result else None
 
 
+async def add_receipt(chat_id: str, receipt_data: dict) -> Optional[dict]:
+    """
+    Atomically add a receipt to the conversation context
+    Uses PostgreSQL JSONB operations to prevent race conditions
+    """
+    # Ensure the conversation exists first
+    await get_or_create(chat_id)
+    
+    # Atomically append receipt to the receipts array in context
+    result = await db.query("""
+        UPDATE conversation_states SET
+            context = jsonb_set(
+                context,
+                '{receipts}',
+                COALESCE(context->'receipts', '[]'::jsonb) || $2::jsonb,
+                true
+            ),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE chat_id = $1
+        RETURNING *
+    """, chat_id, json.dumps([receipt_data]))
+    
+    return result[0] if result else None
+
+
 async def cleanup(days: int = 7) -> int:
     """Delete old inactive conversations"""
     result = await db.execute(f"""

@@ -703,8 +703,8 @@ How many days?"""
 💰 Rate: {format_currency(rate_per_day)}/day
 💵 *Total: {format_currency(total_amount)}*
 
-📎 Please upload your receipt/supporting document (image or PDF).
-Or type *skip* if you don't have one."""
+📎 Please upload your receipt(s) - you can send one or multiple images at once.
+Or type *skip* if you don't have any."""
 
     # ===== FUEL FLOW =====
     if current_step == 'fuel_details':
@@ -725,8 +725,8 @@ Or type *skip* if you don't have one."""
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-📎 Please upload your fuel receipt (image or PDF).
-Or type *skip* if you don't have one."""
+📎 Please upload your receipt(s) - you can send one or multiple images at once.
+Or type *skip* if you don't have any."""
 
     # ===== ACCOMMODATION FLOW =====
     if current_step == 'accommodation_details':
@@ -750,8 +750,8 @@ Or type *skip* if you don't have one."""
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-📎 Please upload your hotel bill/invoice (image or PDF).
-Or type *skip* if you don't have one."""
+📎 Please upload your receipt(s) - you can send one or multiple images at once.
+Or type *skip* if you don't have any."""
 
     # ===== SUNDRY FLOW =====
     if current_step == 'sundry_details':
@@ -772,7 +772,7 @@ Or type *skip* if you don't have one."""
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
 
-📎 Please upload receipt #1 (image or PDF).
+📎 Please upload your receipt(s) - you can send one or multiple images at once.
 
 Or type:
 • *done* - if you've finished uploading
@@ -863,10 +863,6 @@ Or type:
         
         # Handle receipt upload
         if media_info:
-            # Initialize receipts array if not exists
-            receipts = context.get('receipts', [])
-            receipt_num = len(receipts) + 1
-            
             # Extract receipt data from message_text
             extracted_amount = None
             extracted_vendor = None
@@ -896,7 +892,7 @@ Or type:
                     extracted_date = date_part.split('\n')[0].strip()
                     print(f"📅 Extracted date: {extracted_date}")
             
-            # Create receipt obj object
+            # Create receipt object
             new_receipt = {
                 'file_path': media_info.get('saved_filename'),
                 'file_name': media_info.get('saved_filename'),
@@ -908,19 +904,31 @@ Or type:
                 'mimetype': media_info.get('mimetype')
             }
             
-            # Add to receipts array
-            receipts.append(new_receipt)
-            context['receipts'] = receipts
+            # ATOMIC: Add receipt to conversation (prevents race conditions)
+            print(f"💾 Atomically adding receipt to conversation for {chat_id}")
+            updated_state = await conversation_model.add_receipt(chat_id, new_receipt)
+            
+            if not updated_state:
+                print(f"❌ Failed to add receipt atomically")
+                return "❌ Error saving receipt. Please try again."
+            
+            # Get updated context with all receipts
+            updated_context = updated_state.get('context')
+            if isinstance(updated_context, str):
+                import json
+                try:
+                    updated_context = json.loads(updated_context)
+                except:
+                    updated_context = {}
+            
+            receipts = updated_context.get('receipts', [])
+            receipt_num = len(receipts)
             
             # Calculate running total
             receipt_total = sum(r.get('ocr_amount', 0) for r in receipts)
-            user_amount = context.get('total_amount') or context.get('user_amount') or 0
+            user_amount = updated_context.get('total_amount') or updated_context.get('user_amount') or 0
             
-            # Update context
-            await conversation_model.update(chat_id, {
-                'current_step': 'receipt_upload',
-                'context': context
-            })
+            print(f"✅ Receipt #{receipt_num} added. Total receipts: {receipt_num}, Running total: Rs.{receipt_total}")
             
             # Build response
             response = f"""✅ *Receipt #{receipt_num} Saved*"""
@@ -992,7 +1000,8 @@ Or type:
                                 file_size=receipt.get('file_size'),
                                 ocr_amount=receipt.get('ocr_amount'),
                                 ocr_raw_text=None,  # Not storing full OCR text for now
-                                message_id=receipt.get('message_id')
+                                message_id=receipt.get('message_id'),
+                                vendor=receipt.get('vendor')  # Add vendor from receipt
                             )
                             print(f"✅ Receipt #{i} saved to database")
                             
@@ -1018,7 +1027,8 @@ Or type:
                                 file_size=stored_media_info.get('saved_file_size'),
                                 ocr_amount=stored_media_info.get('extracted_amount'),
                                 ocr_raw_text=stored_media_info.get('ocr_text'),
-                                message_id=stored_media_info.get('message_id')
+                                message_id=stored_media_info.get('message_id'),
+                                vendor=stored_media_info.get('vendor')  # Add vendor for legacy path
                             )
                             media_info_list.append(stored_media_info)
                             print(f"✅ Receipt saved to database successfully")

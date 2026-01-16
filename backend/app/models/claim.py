@@ -248,13 +248,13 @@ async def delete(claim_id: int) -> bool:
 async def add_receipt(claim_id: int, file_path: str, file_name: str, 
                       file_type: str = None, file_size: int = None, 
                       ocr_amount: float = None, ocr_raw_text: str = None,
-                      message_id: str = None) -> dict:
+                      message_id: str = None, vendor: str = None) -> dict:
     """Add a receipt/attachment to a claim"""
     result = await db.query("""
         INSERT INTO claim_receipts (claim_id, file_path, file_name, file_type, 
-                                   file_size, ocr_amount, ocr_raw_text, message_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-    """, claim_id, file_path, file_name, file_type, file_size, ocr_amount, ocr_raw_text, message_id)
+                                   file_size, ocr_amount, ocr_raw_text, message_id, vendor)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
+    """, claim_id, file_path, file_name, file_type, file_size, ocr_amount, ocr_raw_text, message_id, vendor)
     
     return result[0] if result else {}
 
@@ -263,7 +263,7 @@ async def get_receipts(claim_id: int) -> list[dict]:
     """Get all receipts for a claim"""
     result = await db.query("""
         SELECT id, claim_id, file_path, file_name, file_type, file_size,
-               ocr_amount, uploaded_at, message_id
+               ocr_amount, uploaded_at, message_id, vendor
         FROM claim_receipts
         WHERE claim_id = $1
         ORDER BY uploaded_at DESC

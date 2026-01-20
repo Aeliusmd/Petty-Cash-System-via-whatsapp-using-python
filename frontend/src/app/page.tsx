@@ -58,7 +58,10 @@ export default function DashboardPage() {
 
   async function fetchStats() {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/stats`);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/stats`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setStats(data);

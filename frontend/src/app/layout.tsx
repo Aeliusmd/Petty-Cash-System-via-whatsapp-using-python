@@ -17,7 +17,10 @@ const geistMono = Geist_Mono({
 });
 
 function LayoutContent({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isAdmin, isManager, user, logout } = useAuth();
+  const { isAuthenticated, isAdmin, isManager, isSuperAdmin, isInOrganization, user, logout, exitOrganization } = useAuth();
+
+  // Super admin without org context - show only organizations
+  const showOnlyOrganizations = isSuperAdmin && !isInOrganization;
 
   return (
     <div className="min-h-screen">
@@ -26,29 +29,54 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
         <header className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
           <div className="max-w-7xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
-              <Link href="/" className="flex items-center gap-3">
+              <Link href={showOnlyOrganizations ? "/organizations" : "/"} className="flex items-center gap-3">
                 <span className="text-2xl">💰</span>
                 <h1 className="text-xl font-bold">Petty Cash System</h1>
               </Link>
               <nav className="flex items-center gap-6">
-                {/* Dashboard - All roles */}
-                <Link href="/" className="hover:text-indigo-200 transition-colors font-medium">
-                  Dashboard
-                </Link>
                 
-                {/* Claims - All roles but different access */}
-                <Link 
-                  href={isAdmin || isManager ? "/claims" : "/my-claims"} 
-                  className="hover:text-indigo-200 transition-colors font-medium"
-                >
-                  {isAdmin || isManager ? 'All Claims' : 'My Claims'}
-                </Link>
-                
-                {/* Employees - Admin only */}
-                {isAdmin && (
-                  <Link href="/employees" className="hover:text-indigo-200 transition-colors font-medium">
-                    Employees
+                {/* Super Admin Mode - Show only Organizations */}
+                {showOnlyOrganizations ? (
+                  <Link href="/organizations" className="hover:text-indigo-200 transition-colors font-medium">
+                    🏢 Organizations
                   </Link>
+                ) : (
+                  <>
+                    {/* Organization Context Indicator - Only show Exit for super admin */}
+                    {isInOrganization && (
+                      <div className="flex items-center gap-2 bg-white/20 px-3 py-1 rounded-lg mr-2">
+                        <span className="text-sm">📍 {user?.organization_name}</span>
+                        {isSuperAdmin && (
+                          <button
+                            onClick={exitOrganization}
+                            className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded transition-colors"
+                          >
+                            Exit
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Dashboard - All roles */}
+                    <Link href="/" className="hover:text-indigo-200 transition-colors font-medium">
+                      Dashboard
+                    </Link>
+                    
+                    {/* Claims - All roles but different access */}
+                    <Link 
+                      href={isAdmin || isManager ? "/claims" : "/my-claims"} 
+                      className="hover:text-indigo-200 transition-colors font-medium"
+                    >
+                      {isAdmin || isManager ? 'All Claims' : 'My Claims'}
+                    </Link>
+                    
+                    {/* Employees - Admin only */}
+                    {isAdmin && (
+                      <Link href="/employees" className="hover:text-indigo-200 transition-colors font-medium">
+                        Employees
+                      </Link>
+                    )}
+                  </>
                 )}
 
                 {/* User info & Logout */}

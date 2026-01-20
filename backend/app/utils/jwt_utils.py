@@ -14,7 +14,15 @@ JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 7
 
 
-def create_access_token(employee_id: int, name: str, is_admin: bool = False, is_manager: bool = False) -> str:
+def create_access_token(
+    employee_id: int, 
+    name: str, 
+    is_admin: bool = False, 
+    is_manager: bool = False, 
+    role: str = None,
+    organization_id: int = None,
+    organization_name: str = None
+) -> str:
     """
     Create a JWT access token for an employee
     
@@ -23,24 +31,31 @@ def create_access_token(employee_id: int, name: str, is_admin: bool = False, is_
         name: The employee's name
         is_admin: Whether the employee is an admin
         is_manager: Whether the employee is a manager
+        role: Explicit role (super_admin, admin, manager, employee) - takes priority
+        organization_id: Current organization context (for super admin entering an org)
+        organization_name: Name of current organization
         
     Returns:
         JWT token string
     """
-    # Determine role: admin > manager > employee
-    if is_admin:
-        role = 'admin'
+    # Use explicit role if provided, otherwise derive from flags
+    if role and role in ('super_admin', 'admin', 'manager', 'employee'):
+        final_role = role
+    elif is_admin:
+        final_role = 'admin'
     elif is_manager:
-        role = 'manager'
+        final_role = 'manager'
     else:
-        role = 'employee'
+        final_role = 'employee'
     
     payload = {
         'employee_id': employee_id,
         'name': name,
-        'role': role,
-        'is_admin': is_admin,
-        'is_manager': is_manager,
+        'role': final_role,
+        'is_admin': is_admin or final_role in ('admin', 'super_admin'),
+        'is_manager': is_manager or final_role in ('manager', 'admin', 'super_admin'),
+        'organization_id': organization_id,
+        'organization_name': organization_name,
         'exp': datetime.utcnow() + timedelta(days=JWT_EXPIRATION_DAYS),
         'iat': datetime.utcnow()
     }

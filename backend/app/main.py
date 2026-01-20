@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi import FastAPI, Request, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -36,7 +36,9 @@ from app.services import notification_service
 from app.models import claim as claim_model
 from app.models import employee as employee_model
 from app.models import otp as otp_model
+from app.models import unit as unit_model
 from app.utils import jwt_utils
+from app.utils.auth import require_super_admin, require_admin, require_authenticated
 
 
 # Message deduplication cache (prevents processing same message multiple times)
@@ -227,6 +229,201 @@ async def health():
 
 
 # ==============================================
+# Organization/Units CRUD (Super Admin Only)
+# ==============================================
+
+class UnitCreate(BaseModel):
+    code: str
+    name: str
+    is_active: bool = True
+
+
+@app.get("/api/units")
+async def get_units(auth: dict = Depends(require_super_admin)):
+    """Get all organizational units - SUPER ADMIN ONLY"""
+    try:
+        units = await unit_model.find_all()
+        return {"units": units}
+    except Exception as e:
+        print(f"❌ Error fetching units: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/units/{unit_id}")
+async def get_unit(unit_id: int, auth: dict = Depends(require_super_admin)):
+    """Get a single unit by ID - SUPER ADMIN ONLY"""
+    try:
+        unit = await unit_model.find_by_id(unit_id)
+        if not unit:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        return unit
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/units")
+async def create_unit(request: UnitCreate, auth: dict = Depends(require_super_admin)):
+    """Create a new organizational unit - SUPER ADMIN ONLY"""
+    try:
+        unit = await unit_model.create(request.dict())
+        return unit
+    except Exception as e:
+        print(f"❌ Error creating unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/units/{unit_id}")
+async def update_unit(unit_id: int, request: UnitCreate, auth: dict = Depends(require_super_admin)):
+    """Update an existing unit - SUPER ADMIN ONLY"""
+    try:
+        unit = await unit_model.update(unit_id, request.dict())
+        if not unit:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        return unit
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/units/{unit_id}")
+async def delete_unit(unit_id: int, auth: dict = Depends(require_super_admin)):
+    """Delete (soft) an organizational unit - SUPER ADMIN ONLY"""
+    try:
+        success = await unit_model.delete(unit_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        return {"message": "Unit deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting unit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/organizations/{org_id}/enter")
+async def enter_organization(org_id: int, request: Request, auth: dict = Depends(require_super_admin)):
+    """
+    Super admin enters an organization to manage it.
+    Returns a new token with organization context and admin role.
+    """
+    try:
+        # Get the organization
+        org = await unit_model.find_by_id(org_id)
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        # Log the entry to audit log
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        
+        await db.execute('''
+            INSERT INTO super_admin_audit_log 
+            (super_admin_id, action, organization_id, organization_name, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        ''', auth['employee_id'], 'ENTER_ORG', org_id, org['name'], client_ip, user_agent)
+        
+        # Create new token with organization context and admin role
+        new_token = jwt_utils.create_access_token(
+            employee_id=auth['employee_id'],
+            name=auth['name'],
+            role='admin',  # Super admin becomes admin inside org
+            organization_id=org_id,
+            organization_name=org['name']
+        )
+        
+        print(f"✅ Super admin {auth['name']} entered organization: {org['name']}")
+        
+        return {
+            "access_token": new_token,
+            "token_type": "bearer",
+            "organization": {
+                "id": org['id'],
+                "name": org['name'],
+                "code": org['code']
+            },
+            "employee": {
+                "id": auth['employee_id'],
+                "name": auth['name'],
+                "role": "admin",
+                "is_super_admin": True,  # Track original super admin status
+                "organization_id": org_id,
+                "organization_name": org['name']
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error entering organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/organizations/exit")
+async def exit_organization(request: Request, auth: dict = Depends(require_authenticated)):
+    """
+    Exit from organization context, return to super admin mode.
+    Returns a new token without organization context.
+    ONLY SUPER ADMIN can use this endpoint.
+    """
+    try:
+        # SECURITY: Only super admin can exit organizations
+        # Check the ORIGINAL role (before entering org, super admin has role='admin' when inside org)
+        # We need to verify this user is actually a super admin
+        employee_id = auth['employee_id']
+        employee = await employee_model.find_by_id(employee_id)
+        
+        if not employee or employee.get('role') != 'super_admin':
+            raise HTTPException(
+                status_code=403,
+                detail="Only super admin can exit organizations"
+            )
+        
+        org_id = auth.get('organization_id')
+        org_name = auth.get('organization_name')
+        
+        # Log the exit to audit log
+        if org_id:
+            client_ip = request.client.host if request.client else "unknown"
+            user_agent = request.headers.get("user-agent", "unknown")
+            
+            await db.execute('''
+                INSERT INTO super_admin_audit_log 
+                (super_admin_id, action, organization_id, organization_name, ip_address, user_agent)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            ''', auth['employee_id'], 'EXIT_ORG', org_id, org_name, client_ip, user_agent)
+        
+        # Create new token without organization context
+        new_token = jwt_utils.create_access_token(
+            employee_id=auth['employee_id'],
+            name=auth['name'],
+            role='super_admin',
+            organization_id=None,
+            organization_name=None
+        )
+        
+        print(f"✅ Super admin {auth['name']} exited organization: {org_name}")
+        
+        return {
+            "access_token": new_token,
+            "token_type": "bearer",
+            "employee": {
+                "id": auth['employee_id'],
+                "name": auth['name'],
+                "role": "super_admin"
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error exiting organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==============================================
 # Authentication Endpoints
 # ==============================================
 
@@ -362,23 +559,44 @@ async def verify_otp(request: VerifyOTPRequest):
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        # Determine role: admin > manager > employee
-        is_admin = employee.get('is_admin', False)
-        is_manager = employee.get('is_manager', False)
+        # Use role from database (supports super_admin, admin, manager, employee)
+        # Fallback to deriving from is_admin/is_manager if role column is empty
+        role = employee.get('role')
+        if not role or role == 'employee':
+            is_admin = employee.get('is_admin', False)
+            is_manager = employee.get('is_manager', False)
+            if is_admin:
+                role = 'admin'
+            elif is_manager:
+                role = 'manager'
+            else:
+                role = 'employee'
         
-        if is_admin:
-            role = 'admin'
-        elif is_manager:
-            role = 'manager'
-        else:
-            role = 'employee'
+        is_admin = role in ('admin', 'super_admin')
+        is_manager = role == 'manager' or employee.get('is_manager', False)
         
-        # Generate JWT token
+        # Get organization info for non-super admin users
+        organization_id = None
+        organization_name = None
+        
+        if role != 'super_admin':
+            # Regular users get their organization automatically
+            organization_id = employee.get('organization_id')
+            if organization_id:
+                # Get organization name
+                org = await unit_model.find_by_id(organization_id)
+                if org:
+                    organization_name = org['name']
+        
+        # Generate JWT token with explicit role and organization
         token = jwt_utils.create_access_token(
             employee_id=employee['id'],
             name=employee['name'],
             is_admin=is_admin,
-            is_manager=is_manager
+            is_manager=is_manager,
+            role=role,  # Pass the actual role (including super_admin)
+            organization_id=organization_id,
+            organization_name=organization_name
         )
         
         return {
@@ -388,7 +606,9 @@ async def verify_otp(request: VerifyOTPRequest):
                 "id": employee['id'],
                 "name": employee['name'],
                 "employee_code": employee['employee_code'],
-                "role": role
+                "role": role,
+                "organization_id": organization_id,
+                "organization_name": organization_name
             }
         }
         
@@ -788,6 +1008,7 @@ async def startup_info():
 
 @app.get("/api/claims")
 async def get_claims(
+    auth: dict = Depends(require_authenticated),
     status: Optional[str] = Query(None, description="Filter by status: PENDING, APPROVED, REJECTED"),
     employee_id: Optional[int] = Query(None, description="Filter by employee ID"),
     manager_id: Optional[int] = Query(None, description="Filter by manager ID"),
@@ -797,11 +1018,22 @@ async def get_claims(
 ):
     """
     Get list of claims with optional filters
+    Filtered by organization context from JWT token
     """
     try:
         from app.db import db
         
-        # Build query based on filters
+        # Get organization from auth token
+        org_id = auth.get('organization_id')
+        
+        # Super admin without org context cannot access this endpoint
+        if not org_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="Please enter an organization first to view claims"
+            )
+        
+        # Build query based on filters - FILTER BY ORGANIZATION
         query = """
             SELECT c.*, e.name as employee_name, e.employee_code, e.phone_number,
                    g.code as grade_code, cat.code as category_code, cat.name as category_name,
@@ -815,10 +1047,10 @@ async def get_claims(
             JOIN claim_statuses s ON c.status_id = s.id
             LEFT JOIN employees m ON c.manager_id = m.id
             LEFT JOIN employees a ON c.approved_by = a.id
-            WHERE 1=1
+            WHERE e.organization_id = $1
         """
-        params = []
-        param_index = 1
+        params = [org_id]
+        param_index = 2
         
         # DEBUG: Print filters
         print(f"🔍 get_claims filters: employee_id={employee_id}, status={status}, user_role={role if 'role' in locals() else 'unknown'}")
@@ -849,10 +1081,17 @@ async def get_claims(
         
         claims = await db.query(query, *params)
         
-        # Get total count for pagination
-        count_query = "SELECT COUNT(*) as total FROM claims c JOIN claim_statuses s ON c.status_id = s.id WHERE 1=1"
-        count_params = []
-        param_index = 1
+        
+        # Get total count for pagination - ALSO FILTER BY ORGANIZATION
+        count_query = """
+            SELECT COUNT(*) as total 
+            FROM claims c 
+            JOIN employees e ON c.employee_id = e.id
+            JOIN claim_statuses s ON c.status_id = s.id 
+            WHERE e.organization_id = $1
+        """
+        count_params = [org_id]
+        param_index = 2
         
         if status:
             count_query += f" AND s.code = ${param_index}"
@@ -1103,14 +1342,25 @@ async def get_receipt_file(filename: str):
 
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(auth: dict = Depends(require_authenticated)):
     """
     Get dashboard statistics for claims
+    Filtered by organization context from JWT token
     """
     try:
         from app.db import db
         
-        # Overall stats
+        # Get organization from auth token
+        org_id = auth.get('organization_id')
+        
+        # Super admin without org context cannot access this endpoint
+        if not org_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="Please enter an organization first to view dashboard"
+            )
+        
+        # Overall stats - FILTER BY ORGANIZATION
         stats_query = """
             SELECT 
                 COUNT(*) as total_claims,
@@ -1120,25 +1370,28 @@ async def get_stats():
                 COALESCE(SUM(c.final_amount) FILTER (WHERE s.code = 'APPROVED'), 0) as total_approved_amount,
                 COALESCE(SUM(c.user_amount) FILTER (WHERE s.code = 'PENDING'), 0) as pending_amount
             FROM claims c
+            JOIN employees e ON c.employee_id = e.id
             JOIN claim_statuses s ON c.status_id = s.id
+            WHERE e.organization_id = $1
         """
-        stats = await db.query(stats_query)
+        stats = await db.query(stats_query, org_id)
         
-        # Category breakdown
+        # Category breakdown - FILTER BY ORGANIZATION
         category_query = """
             SELECT cat.name as category, cat.code as category_code,
                    COUNT(*) as count,
                    COALESCE(SUM(c.final_amount), 0) as total_amount
             FROM claims c
+            JOIN employees e ON c.employee_id = e.id
             JOIN claim_categories cat ON c.category_id = cat.id
             JOIN claim_statuses s ON c.status_id = s.id
-            WHERE s.code = 'APPROVED'
+            WHERE e.organization_id = $1 AND s.code = 'APPROVED'
             GROUP BY cat.id, cat.name, cat.code
             ORDER BY total_amount DESC
         """
-        categories = await db.query(category_query)
+        categories = await db.query(category_query, org_id)
         
-        # Recent claims (last 5)
+        # Recent claims (last 5) - FILTER BY ORGANIZATION
         recent_query = """
             SELECT c.claim_number, c.created_at, e.name as employee_name,
                    cat.name as category_name, c.final_amount, s.code as status_code
@@ -1146,17 +1399,19 @@ async def get_stats():
             JOIN employees e ON c.employee_id = e.id
             JOIN claim_categories cat ON c.category_id = cat.id
             JOIN claim_statuses s ON c.status_id = s.id
+            WHERE e.organization_id = $1
             ORDER BY c.created_at DESC
             LIMIT 5
         """
-        recent = await db.query(recent_query)
+        recent = await db.query(recent_query, org_id)
         
         return {
             "overview": stats[0] if stats else {},
             "categories": categories,
             "recent_claims": recent
         }
-        
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1164,20 +1419,48 @@ async def get_stats():
 
 @app.get("/api/employees")
 async def get_employees(
+    auth: dict = Depends(require_authenticated),
     role: Optional[str] = Query(None),
     location_id: Optional[int] = Query(None),
     include_inactive: bool = Query(False)
 ):
     """
     Get list of employees with optional filters
+    Filtered by organization context from JWT token
     """
     try:
-        employees = await employee_model.find_all_with_details(
-            role=role, 
-            location_id=location_id, 
-            include_inactive=include_inactive
-        )
+        # Get organization from auth token
+        org_id = auth.get('organization_id')
+        
+        # Super admin without org context cannot access this endpoint
+        if not org_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="Please enter an organization first to view employees"
+            )
+        
+        # Filter employees by organization
+        employees = await db.query('''
+            SELECT e.*, g.code as grade_code, g.name as grade_name,
+                   u.code as unit_code, u.name as unit_name
+            FROM employees e
+            LEFT JOIN grades g ON e.grade_id = g.id
+            LEFT JOIN units u ON e.organization_id = u.id
+            WHERE e.organization_id = $1
+            AND ($2::VARCHAR IS NULL OR 
+                 (CASE 
+                    WHEN e.is_admin THEN 'admin'
+                    WHEN e.is_manager THEN 'manager'
+                    ELSE 'employee'
+                 END) = $2)
+            AND ($3::INTEGER IS NULL OR e.location_id = $3)
+            AND (e.is_active = TRUE OR $4 = TRUE)
+            ORDER BY e.name
+        ''', org_id, role, location_id, include_inactive)
+        
         return {"employees": employees, "total": len(employees)}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Error fetching employees: {e}")
         raise HTTPException(status_code=500, detail=str(e))

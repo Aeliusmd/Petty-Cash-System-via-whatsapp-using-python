@@ -68,7 +68,10 @@ export default function LoginPage() {
       const data = await res.json();
       login(data.access_token, data.employee);
 
-      if (data.employee.role === 'admin' || data.employee.role === 'manager') {
+      // Redirect based on role
+      if (data.employee.role === 'super_admin') {
+        router.push('/organizations');  // Super admin goes to org list
+      } else if (data.employee.role === 'admin' || data.employee.role === 'manager') {
         router.push('/claims');
       } else {
         router.push('/my-claims');

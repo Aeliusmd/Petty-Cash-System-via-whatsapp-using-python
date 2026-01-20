@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Unit {
   id: number;
@@ -14,21 +15,31 @@ interface Unit {
 
 export default function OrganizationsPage() {
   const router = useRouter();
+  const { isSuperAdmin, token, enterOrganization } = useAuth();
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
   const [formData, setFormData] = useState({ code: '', name: '' });
 
   useEffect(() => {
+    // Check super admin access
+    if (!isSuperAdmin) {
+      setAccessDenied(true);
+      setLoading(false);
+      // Redirect after showing message
+      setTimeout(() => router.push('/'), 2000);
+      return;
+    }
     fetchUnits();
-  }, []);
+  }, [isSuperAdmin, router]);
 
   const fetchUnits = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const authToken = localStorage.getItem('auth_token');
       const res = await fetch('http://localhost:4101/api/units', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${authToken}` }
       });
       const data = await res.json();
       setUnits(data.units || data || []);
@@ -42,7 +53,7 @@ export default function OrganizationsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('token');
+      const authToken = localStorage.getItem('auth_token');
       const url = editingUnit 
         ? `http://localhost:4101/api/units/${editingUnit.id}`
         : 'http://localhost:4101/api/units';
@@ -50,7 +61,7 @@ export default function OrganizationsPage() {
       const res = await fetch(url, {
         method: editingUnit ? 'PUT' : 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
@@ -71,10 +82,10 @@ export default function OrganizationsPage() {
     if (!confirm('Are you sure you want to delete this organization?')) return;
     
     try {
-      const token = localStorage.getItem('token');
+      const authToken = localStorage.getItem('auth_token');
       const res = await fetch(`http://localhost:4101/api/units/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${authToken}` }
       });
 
       if (res.ok) {
@@ -87,20 +98,27 @@ export default function OrganizationsPage() {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Organizations / Units</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          + Add Organization
-        </button>
-      </div>
-
-      {loading ? (
+      {accessDenied ? (
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
+          <div className="text-red-500 text-6xl mb-4">🚫</div>
+          <h1 className="text-2xl font-bold text-red-600 mb-2">Access Denied</h1>
+          <p className="text-gray-600">Super Admin privileges required to access this page.</p>
+          <p className="text-gray-400 text-sm mt-2">Redirecting to dashboard...</p>
+        </div>
+      ) : loading ? (
         <p>Loading...</p>
       ) : (
-        <div className="bg-white shadow rounded-lg overflow-hidden">
+        <>
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold">Organizations / Units</h1>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            >
+              + Add Organization
+            </button>
+          </div>
+          <div className="bg-white shadow rounded-lg overflow-hidden">
           <table className="min-w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -112,22 +130,28 @@ export default function OrganizationsPage() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {units.map((unit) => (
-                <tr key={unit.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">{unit.code}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">{unit.name}</td>
+                <tr key={unit.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{unit.code}</td>
+                  <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{unit.name}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 rounded text-xs ${unit.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       {unit.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-6 py-4 whitespace-nowrap space-x-2">
+                    <button
+                      onClick={() => enterOrganization(unit.id)}
+                      className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm font-medium"
+                    >
+                      Enter →
+                    </button>
                     <button
                       onClick={() => {
                         setEditingUnit(unit);
                         setFormData({ code: unit.code, name: unit.name });
                         setShowAddModal(true);
                       }}
-                      className="text-blue-600 hover:text-blue-800 mr-3"
+                      className="text-blue-600 hover:text-blue-800"
                     >
                       Edit
                     </button>
@@ -143,6 +167,7 @@ export default function OrganizationsPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Add/Edit Modal */}

@@ -100,7 +100,10 @@ function MyClaimsContent() {
       params.set('limit', itemsPerPage.toString());
       params.set('offset', ((currentPage - 1) * itemsPerPage).toString());
       
-      const res = await fetch(`${API_BASE_URL}/api/claims?${params}`);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/claims?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error('Failed to fetch claims');
       const data = await res.json();
       setClaims(data.claims || []);

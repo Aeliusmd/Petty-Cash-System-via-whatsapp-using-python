@@ -115,7 +115,10 @@ function ClaimsContent() {
 
   async function fetchEmployees() {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/employees?include_inactive=false`);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/employees?include_inactive=false`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error('Failed to fetch employees');
       const data = await res.json();
       setEmployees(data.employees || []);
@@ -145,7 +148,10 @@ function ClaimsContent() {
         params.set('manager_id', user.id.toString());
       }
       
-      const res = await fetch(`${API_BASE_URL}/api/claims?${params}`);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/claims?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error('Failed to fetch claims');
       const data = await res.json();
       setClaims(data.claims || []);
@@ -162,9 +168,13 @@ function ClaimsContent() {
     
     setProcessing(claimId);
     try {
+      const token = localStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/api/claims/${claimId}/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json' 
+        },
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -187,9 +197,13 @@ function ClaimsContent() {
     
     setProcessing(claimId);
     try {
+      const token = localStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/api/claims/${claimId}/reject`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({ reason: rejectReason }),
       });
       if (!res.ok) {
@@ -212,8 +226,10 @@ function ClaimsContent() {
     
     setProcessing(claimId);
     try {
+      const token = localStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/api/claims/${claimId}`, {
         method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) {
         const errorData = await res.json();

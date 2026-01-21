@@ -33,10 +33,12 @@ from app import waha_client
 from app import reply_engine
 from app.services import textract_service
 from app.services import notification_service
+from app.services import audit_service
 from app.models import claim as claim_model
 from app.models import employee as employee_model
 from app.models import otp as otp_model
 from app.models import unit as unit_model
+from app.models import audit_log as audit_log_model
 from app.utils import jwt_utils
 from app.utils.auth import require_super_admin, require_admin, require_authenticated
 
@@ -269,6 +271,16 @@ async def create_unit(request: UnitCreate, auth: dict = Depends(require_super_ad
     """Create a new organizational unit - SUPER ADMIN ONLY"""
     try:
         unit = await unit_model.create(request.dict())
+        
+        # Log organization creation
+        await audit_service.log_organization_action(
+            organization_id=unit['id'],
+            action='CREATE',
+            performed_by=auth['employee_id'],
+            metadata=request.dict(),
+            request=None
+        )
+        
         return unit
     except Exception as e:
         print(f"❌ Error creating unit: {e}")
@@ -282,6 +294,16 @@ async def update_unit(unit_id: int, request: UnitCreate, auth: dict = Depends(re
         unit = await unit_model.update(unit_id, request.dict())
         if not unit:
             raise HTTPException(status_code=404, detail="Unit not found")
+            
+        # Log organization update
+        await audit_service.log_organization_action(
+            organization_id=unit_id,
+            action='UPDATE',
+            performed_by=auth['employee_id'],
+            metadata={'changes': request.dict()},
+            request=None
+        )
+        
         return unit
     except HTTPException:
         raise
@@ -297,6 +319,16 @@ async def delete_unit(unit_id: int, auth: dict = Depends(require_super_admin)):
         success = await unit_model.delete(unit_id)
         if not success:
             raise HTTPException(status_code=404, detail="Unit not found")
+            
+        # Log organization deletion
+        await audit_service.log_organization_action(
+            organization_id=unit_id,
+            action='DELETE',
+            performed_by=auth['employee_id'],
+            metadata={'unit_id': unit_id},
+            request=None
+        )
+        
         return {"message": "Unit deleted successfully"}
     except HTTPException:
         raise
@@ -321,6 +353,19 @@ async def enter_organization(org_id: int, request: Request, auth: dict = Depends
         client_ip = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "unknown")
         
+        # Log organization entry
+        await audit_service.log_organization_action(
+            organization_id=org_id,
+            action='ENTER',
+            performed_by=auth['employee_id'],
+            request=request,
+            metadata={
+                'organization_name': org['name'],
+                'super_admin_name': auth['name']
+            }
+        )
+        
+        # Also log to super_admin_audit_log for backwards compatibility
         await db.execute('''
             INSERT INTO super_admin_audit_log 
             (super_admin_id, action, organization_id, organization_name, ip_address, user_agent)
@@ -390,6 +435,19 @@ async def exit_organization(request: Request, auth: dict = Depends(require_authe
             client_ip = request.client.host if request.client else "unknown"
             user_agent = request.headers.get("user-agent", "unknown")
             
+            # Log organization exit
+            await audit_service.log_organization_action(
+                organization_id=org_id,
+                action='EXIT',
+                performed_by=auth['employee_id'],
+                request=request,
+                metadata={
+                    'organization_name': org_name,
+                    'super_admin_name': auth['name']
+                }
+            )
+            
+            # Also log to super_admin_audit_log for backwards compatibility
             await db.execute('''
                 INSERT INTO super_admin_audit_log 
                 (super_admin_id, action, organization_id, organization_name, ip_address, user_agent)
@@ -522,6 +580,15 @@ Do not share this code with anyone."""
         else:
             print(f"⚠️ Could not generate chat ID for {employee['name']}")
         
+        # Log OTP request
+        await audit_service.log_auth_action(
+            action='OTP_REQUEST',
+            employee_id=employee['id'],
+            metadata={'phone_number': phone_number, 'employee_name': employee['name']},
+            request=None,
+            organization_id=employee.get('organization_id')
+        )
+        
         return {
             "message": "OTP sent successfully",
             "phone_number": phone_number,
@@ -597,6 +664,20 @@ async def verify_otp(request: VerifyOTPRequest):
             role=role,  # Pass the actual role (including super_admin)
             organization_id=organization_id,
             organization_name=organization_name
+        )
+        
+        # Log successful login
+        await audit_service.log_auth_action(
+            action='LOGIN',
+            employee_id=employee['id'],
+            metadata={
+                'employee_name': employee['name'],
+                'employee_code': employee['employee_code'],
+                'role': role,
+                'success': True
+            },
+            request=None,
+            organization_id=organization_id
         )
         
         return {
@@ -890,6 +971,33 @@ async def process_message(correlation_id: str, payload: dict, session: str):
                     filename=media_filename
                 )
                 print(f'[{correlation_id}] 💾 Media file saved: {saved_filename} ({saved_file_size} bytes)')
+                
+                # Audit Log: Receipt Upload
+                try:
+                    # Find employee to attribute the upload
+                    receipt_employee = await employee_model.find_by_chat_id(chat_id)
+                    if not receipt_employee and '@' in chat_id:
+                         # Try extracting phone
+                         phone_part = chat_id.split('@')[0]
+                         receipt_employee = await employee_model.find_by_phone(phone_part)
+                    
+                    if receipt_employee:
+                        await audit_service.log_receipt_action(
+                            receipt_id=0, # File only, not yet in DB
+                            claim_id=0,
+                            action='UPLOAD',
+                            performed_by=receipt_employee['id'],
+                            organization_id=receipt_employee.get('organization_id'),
+                            metadata={
+                                'filename': saved_filename,
+                                'original_filename': media_filename,
+                                'file_size': saved_file_size,
+                                'mime_type': mime_type,
+                                'chat_id': chat_id
+                            }
+                        )
+                except Exception as audit_err:
+                     print(f"⚠️ Failed to log receipt upload audit: {audit_err}")
             except Exception as save_error:
                 print(f'[{correlation_id}] ⚠️ Failed to save media file: {save_error}')
             
@@ -1138,7 +1246,7 @@ async def get_claim(claim_id: int):
 
 
 @app.post("/api/claims/{claim_id}/approve")
-async def approve_claim(claim_id: int, request: ApproveClaimRequest = None):
+async def approve_claim(claim_id: int, request: ApproveClaimRequest = None, req: Request = None, auth: dict = Depends(require_authenticated)):
     """
     Approve a claim and notify the staff via WhatsApp
     """
@@ -1154,14 +1262,39 @@ async def approve_claim(claim_id: int, request: ApproveClaimRequest = None):
         
         # Approve the claim (using manager_id as approver for now)
         final_amount = request.final_amount if request else None
-        approver_id = claim.get('manager_id') or claim.get('employee_id')
+        approver_id = auth.get('employee_id') or claim.get('manager_id') or claim.get('employee_id')
         
         # Record status change in history
         await claim_model.record_status_change(
             claim_id, current_status, 'APPROVED', approver_id, 'Approved by manager'
         )
         
+        # Audit log: Capture old values before approval
+        old_values = {
+            'status': current_status,
+            'final_amount': claim.get('final_amount')
+        }
+        
         updated_claim = await claim_model.approve(claim_id, approver_id, final_amount)
+        
+        # Audit log: Capture new values after approval
+        new_values = {
+            'status': 'APPROVED',
+            'final_amount': final_amount or claim.get('final_amount'),
+            'approved_by': approver_id
+        }
+        
+        # Log the approval action
+        await audit_service.log_claim_action(
+            claim_id=claim_id,
+            action='APPROVE',
+            old_values=old_values,
+            new_values=new_values,
+            performed_by=approver_id,
+            request=req,
+            organization_id=auth.get('organization_id'),
+            metadata={'claim_number': claim.get('claim_number')}
+        )
         
         # Notify staff via WhatsApp
         await notification_service.notify_staff_of_approval(updated_claim)
@@ -1183,7 +1316,7 @@ async def approve_claim(claim_id: int, request: ApproveClaimRequest = None):
 
 
 @app.post("/api/claims/{claim_id}/reject")
-async def reject_claim(claim_id: int, request: RejectClaimRequest):
+async def reject_claim(claim_id: int, request: RejectClaimRequest, req: Request = None, auth: dict = Depends(require_authenticated)):
     """
     Reject a claim with a reason and notify the staff via WhatsApp
     """
@@ -1201,14 +1334,39 @@ async def reject_claim(claim_id: int, request: RejectClaimRequest):
             raise HTTPException(status_code=400, detail="Rejection reason is required (minimum 3 characters)")
         
         # Reject the claim
-        approver_id = claim.get('manager_id') or claim.get('employee_id')
+        approver_id = auth.get('employee_id') or claim.get('manager_id') or claim.get('employee_id')
         
         # Record status change in history
         await claim_model.record_status_change(
             claim_id, current_status, 'REJECTED', approver_id, request.reason.strip()
         )
         
+        # Audit log: Capture old values before rejection
+        old_values = {
+            'status': current_status,
+            'rejection_reason': claim.get('rejection_reason')
+        }
+        
         updated_claim = await claim_model.reject(claim_id, approver_id, request.reason.strip())
+        
+        # Audit log: Capture new values after rejection
+        new_values = {
+            'status': 'REJECTED',
+            'rejection_reason': request.reason.strip(),
+            'rejected_by': approver_id
+        }
+        
+        # Log the rejection action
+        await audit_service.log_claim_action(
+            claim_id=claim_id,
+            action='REJECT',
+            old_values=old_values,
+            new_values=new_values,
+            performed_by=approver_id,
+            request=req,
+            organization_id=auth.get('organization_id'),
+            metadata={'claim_number': claim.get('claim_number'), 'reason': request.reason.strip()}
+        )
         
         # Notify staff via WhatsApp
         await notification_service.notify_staff_of_rejection(updated_claim, request.reason.strip())
@@ -1417,6 +1575,213 @@ async def get_stats(auth: dict = Depends(require_authenticated)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================
+# AUDIT LOGS API ENDPOINTS (ADMIN ONLY)
+# =============================================
+
+@app.get("/api/audit-logs")
+async def get_audit_logs(
+    auth: dict = Depends(require_admin),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
+    action: Optional[str] = Query(None, description="Filter by action"),
+    performed_by: Optional[int] = Query(None, description="Filter by employee ID"),
+    from_date: Optional[str] = Query(None, description="Filter from date (ISO format)"),
+    to_date: Optional[str] = Query(None, description="Filter to date (ISO format)"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Get audit logs with optional filtering (ADMIN ONLY)
+    Automatically filtered by organization context from JWT token
+    """
+    try:
+        from app.utils.audit_descriptions import get_audit_description
+        
+        # Get organization from auth token
+        org_id = auth.get('organization_id')
+        
+        # Get audit logs with filters
+        logs = await audit_log_model.find_all(
+            entity_type=entity_type,
+            action=action,
+            performed_by=performed_by,
+            organization_id=org_id,  # Filter by organization
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Add human-readable description to each log
+        for log in logs:
+            log['description'] = get_audit_description(log)
+        
+        # Get total count for pagination
+        total = await audit_log_model.count_all(
+            entity_type=entity_type,
+            action=action,
+            performed_by=performed_by,
+            organization_id=org_id,
+            from_date=from_date,
+            to_date=to_date
+        )
+        
+        return {
+            "audit_logs": logs,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        print(f"❌ Error fetching audit logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audit-logs/stats")
+async def get_audit_log_stats(auth: dict = Depends(require_admin)):
+    """
+    Get audit log statistics (ADMIN ONLY)
+    """
+    try:
+        stats = await audit_log_model.get_statistics()
+        return stats
+        
+    except Exception as e:
+        print(f"❌ Error fetching audit log stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audit-logs/export")
+async def export_audit_logs(
+    auth: dict = Depends(require_admin),
+    entity_type: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    performed_by: Optional[int] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None)
+):
+    """
+    Export audit logs as CSV (ADMIN ONLY)
+    """
+    try:
+        from fastapi.responses import StreamingResponse
+        import csv
+        import io
+        from datetime import datetime
+        from app.utils.audit_descriptions import get_audit_description
+        
+        # Get organization from auth token
+        org_id = auth.get('organization_id')
+        
+        # Get all matching logs (no limit for export)
+        logs = await audit_log_model.find_all(
+            entity_type=entity_type,
+            action=action,
+            performed_by=performed_by,
+            organization_id=org_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=10000,  # Max export limit
+            offset=0
+        )
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Timestamp', 'Description', 'Action', 'Entity Type', 'Entity ID',
+            'Performed By', 'Employee Code', 'IP Address', 'Organization'
+        ])
+        
+        # Write data with human-readable descriptions
+        for log in logs:
+            description = get_audit_description(log)
+            # Remove markdown bold markers for CSV
+            description = description.replace('**', '')
+            writer.writerow([
+                log.get('created_at'),
+                description,
+                log.get('action'),
+                log.get('entity_type'),
+                log.get('entity_id'),
+                log.get('performed_by_name', 'System'),
+                log.get('performed_by_code', ''),
+                log.get('ip_address'),
+                log.get('organization_name', '')
+            ])
+        
+        # Prepare response
+        output.seek(0)
+        filename = f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except Exception as e:
+        print(f"❌ Error exporting audit logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audit-logs/{audit_log_id}")
+async def get_audit_log(
+    audit_log_id: int,
+    auth: dict = Depends(require_admin)
+):
+    """
+    Get a specific audit log entry by ID (ADMIN ONLY)
+    """
+    try:
+        log = await audit_log_model.find_by_id(audit_log_id)
+        
+        if not log:
+            raise HTTPException(status_code=404, detail="Audit log not found")
+        
+        # Security: Verify the log belongs to the user's organization
+        org_id = auth.get('organization_id')
+        if org_id and log.get('organization_id') != org_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        return log
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching audit log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audit-logs/entity/{entity_type}/{entity_id}")
+async def get_audit_logs_by_entity(
+    entity_type: str,
+    entity_id: int,
+    auth: dict = Depends(require_admin)
+):
+    """
+    Get all audit logs for a specific entity (ADMIN ONLY)
+    """
+    try:
+        logs = await audit_log_model.find_by_entity(entity_type, entity_id)
+        
+        # Security: Filter by organization if applicable
+        org_id = auth.get('organization_id')
+        if org_id:
+            logs = [log for log in logs if log.get('organization_id') == org_id]
+        
+        return {"audit_logs": logs}
+        
+    except Exception as e:
+        print(f"❌ Error fetching entity audit logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/employees")
 async def get_employees(
     auth: dict = Depends(require_authenticated),
@@ -1498,7 +1863,10 @@ class CreateEmployeeRequest(BaseModel):
 
 
 @app.post("/api/employees")
-async def create_employee(request: CreateEmployeeRequest):
+async def create_employee(
+    request: CreateEmployeeRequest,
+    auth: dict = Depends(require_admin)
+):
     """
     Create a new employee
     """
@@ -1515,6 +1883,16 @@ async def create_employee(request: CreateEmployeeRequest):
             request.is_manager = False
 
         employee = await employee_model.create(request.model_dump())
+        
+        # Log employee creation
+        await audit_service.log_employee_action(
+            action='CREATE',
+            employee_id=employee['id'],
+            performed_by=auth['employee_id'],
+            metadata=request.model_dump(),
+            organization_id=auth.get('organization_id')
+        )
+        
         return {
             "success": True,
             "message": "Employee created successfully",
@@ -1541,7 +1919,11 @@ class UpdateEmployeeRequest(BaseModel):
 
 
 @app.put("/api/employees/{employee_id}")
-async def update_employee(employee_id: int, request: UpdateEmployeeRequest):
+async def update_employee(
+    employee_id: int, 
+    request: UpdateEmployeeRequest,
+    auth: dict = Depends(require_admin)
+):
     """
     Update an employee
     """
@@ -1567,6 +1949,18 @@ async def update_employee(employee_id: int, request: UpdateEmployeeRequest):
         employee = await employee_model.update(employee_id, update_data)
         if not employee:
             raise HTTPException(status_code=500, detail="Failed to update employee")
+            
+        # Log employee update
+        await audit_service.log_employee_action(
+            action='UPDATE',
+            employee_id=employee_id,
+            performed_by=auth['employee_id'],
+            metadata={
+                'changes': update_data,
+                'employee_name': existing['name']
+            },
+            organization_id=auth.get('organization_id')
+        )
         
         return {
             "success": True,
@@ -1581,7 +1975,11 @@ async def update_employee(employee_id: int, request: UpdateEmployeeRequest):
 
 
 @app.delete("/api/employees/{employee_id}")
-async def delete_employee(employee_id: int, permanent: bool = Query(False)):
+async def delete_employee(
+    employee_id: int, 
+    permanent: bool = Query(False),
+    auth: dict = Depends(require_admin)
+):
     """
     Delete an employee (soft delete by default, permanent if specified)
     """
@@ -1589,11 +1987,24 @@ async def delete_employee(employee_id: int, permanent: bool = Query(False)):
         existing = await employee_model.find_by_id(employee_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Employee not found")
+            
+        success = await employee_model.delete(employee_id, permanent)
         
-        if permanent:
-            success = await employee_model.hard_delete(employee_id)
-        else:
-            success = await employee_model.delete(employee_id)
+        if success:
+            # Log employee deletion
+            await audit_service.log_employee_action(
+                action='DELETE',
+                employee_id=employee_id,
+                performed_by=auth['employee_id'],
+                metadata={
+                    'permanent': permanent,
+                    'employee_name': existing['name'],
+                    'employee_code': existing.get('employee_code')
+                },
+                organization_id=auth.get('organization_id')
+            )
+            
+        return {"success": success}
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete employee")

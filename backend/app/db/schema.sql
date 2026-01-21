@@ -221,11 +221,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     performed_by INT REFERENCES employees(id),
     ip_address VARCHAR(50),
     user_agent TEXT,
+    session_id VARCHAR(100),
+    organization_id INT REFERENCES units(id),
+    metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_performed_by ON audit_logs(performed_by);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_organization ON audit_logs(organization_id);
 
 -- =============================================
 -- HELPER FUNCTIONS

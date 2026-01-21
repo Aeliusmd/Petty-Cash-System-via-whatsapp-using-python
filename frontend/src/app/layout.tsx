@@ -76,6 +76,13 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                         Employees
                       </Link>
                     )}
+                    
+                    {/* Audit Logs - Admin only */}
+                    {isAdmin && (
+                      <Link href="/audit-logs" className="hover:text-indigo-200 transition-colors font-medium">
+                        📋 Audit Logs
+                      </Link>
+                    )}
                   </>
                 )}
 

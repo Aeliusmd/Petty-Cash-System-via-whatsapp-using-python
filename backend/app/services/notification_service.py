@@ -312,7 +312,11 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         # Get receipts from database to show detailed breakdown
         receipts_from_db = await claim_model.get_receipts(claim['id'])
         
-        # Build receipt details section
+        # Helper to get public URL
+        import os
+        base_url = os.getenv('PUBLIC_BACKEND_URL', 'http://localhost:4101')
+        
+        # Build receipt details section with links
         receipt_section = ""
         if receipts_from_db and len(receipts_from_db) > 0:
             receipt_section = f"\n\n📎 *Receipts ({len(receipts_from_db)}):*"
@@ -320,13 +324,18 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
             for i, receipt in enumerate(receipts_from_db, 1):
                 receipt_amount = receipt.get('ocr_amount', 0)
                 vendor = receipt.get('vendor') or 'Unknown'
+                
+                # Get link
+                filename = receipt.get('file_path')
+                receipt_link = f"{base_url}/api/receipts/{filename}" if filename else "N/A"
+                
                 receipt_section += f"\n  {i}. Rs. {receipt_amount:,.0f} - {vendor}"
+                receipt_section += f"\n     🔗 {receipt_link}"
+                
                 total_from_receipts += receipt_amount
             
             if total_from_receipts > 0:
                 receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
-            
-            receipt_section += "\n\n🧾 Receipt files: Attached below"
         else:
             receipt_section = "\n\n🧾 Receipt: Not provided"
         
@@ -346,32 +355,19 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
 ❌ *Reject {full_claim['id']} [reason]*
 ━━━━━━━━━━━━━━━━━━━━"""
 
-        # Send the text message first
+        # Send the text message
         await waha_client.send_text(manager_chat_id, message)
         print(f"✅ Sent new claim notification to manager {manager['name']}")
         
-        # Forward ALL receipts (supports multi-receipt)
-        if media_info:
-            # Handle both single media_info (dict) and list of media_info
-            media_list = media_info if isinstance(media_info, list) else [media_info]
-            
-            forwarded_count = 0
-            for i, media in enumerate(media_list, 1):
-                if media and media.get('message_id'):
+        # Only forward WhatsApp messages if they exist (forwarding is supported by NOWEB)
+        if receipts_from_db:
+             for i, receipt in enumerate(receipts_from_db, 1):
+                if receipt.get('message_id'):
                     try:
-                        # Use WAHA's forwardMessage to forward the original receipt
-                        result = await waha_client.forward_message(manager_chat_id, media['message_id'])
-                        if result:
-                            forwarded_count += 1
-                            print(f"✅ Forwarded receipt #{i} to manager {manager['name']}")
-                        else:
-                            print(f"⚠️ Could not forward receipt #{i} to manager")
+                        print(f"🔄 Forwarding receipt #{i} message to manager")
+                        await waha_client.forward_message(manager_chat_id, receipt['message_id'])
                     except Exception as e:
-                        print(f"❌ Error forwarding receipt #{i}: {e}")
-            
-            if forwarded_count > 0:
-                print(f"✅ Successfully forwarded {forwarded_count}/{len(media_list)} receipt(s)")
-        
+                        print(f"⚠️ Could not forward message for receipt #{i}: {e}")
         
         return True
         

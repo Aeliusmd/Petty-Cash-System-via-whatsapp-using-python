@@ -18,6 +18,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  isLoading: boolean;
   login: (token: string, userData: User) => void;
   logout: () => void;
   enterOrganization: (orgId: number) => Promise<void>;
@@ -35,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Load auth state from localStorage on mount
   useEffect(() => {
@@ -45,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(storedToken);
       setUser(JSON.parse(storedUser));
     }
+    setIsLoading(false);
   }, []);
 
   const login = (newToken: string, userData: User) => {
@@ -133,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         token,
+        isLoading,
         login,
         logout,
         enterOrganization,

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, Query, Depends
+from fastapi import FastAPI, Request, HTTPException, Query, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -38,6 +38,7 @@ from app.models import claim as claim_model
 from app.models import employee as employee_model
 from app.models import otp as otp_model
 from app.models import unit as unit_model
+from app.models import rates as rates_model
 from app.models import audit_log as audit_log_model
 from app.utils import jwt_utils
 from app.utils.auth import require_super_admin, require_admin, require_authenticated
@@ -1114,6 +1115,127 @@ async def startup_info():
 # CLAIMS MANAGEMENT API ENDPOINTS
 # =============================================
 
+@app.get("/api/categories")
+async def get_categories(auth: dict = Depends(require_authenticated)):
+    """Get all claim categories for dropdown"""
+    try:
+        categories = await rates_model.get_all_categories()
+        return {"categories": categories}
+    except Exception as e:
+        print(f"❌ Error fetching categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+from typing import List
+
+@app.post("/api/claims")
+async def create_claim(
+    receipts: List[UploadFile] = File(...),
+    amount: float = Form(...),
+    category_id: int = Form(...),
+    location_id: Optional[int] = Form(None),
+    description: Optional[str] = Form(None),
+    auth: dict = Depends(require_authenticated)
+):
+    """
+    Create a new claim with multiple receipt uploads.
+    For employees to submit claims via web interface.
+    """
+    try:
+        from datetime import datetime
+        import uuid
+        
+        # Get employee details (including manager_id)
+        employee = await employee_model.find_by_id(auth['employee_id'])
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Get category to determine claim type
+        category = await rates_model.find_category_by_id(category_id)
+        if not category:
+            raise HTTPException(status_code=400, detail="Invalid category")
+        
+        # Create the claim
+        claim = await claim_model.create({
+            'employee_id': employee['id'],
+            'category_id': category_id,
+            'location_id': location_id or employee.get('location_id'),
+            'claim_type': 'outright' if category['code'] == 'BATTA' else 'bill',
+            'duration_days': 1,
+            'user_amount': amount,
+            'system_amount': amount,  # For web claims, user enters final amount
+            'description': description or f"{category['name']} claim",
+            'manager_id': employee.get('manager_id')
+        })
+        
+        print(f"✅ Created claim {claim['claim_number']} via web for {employee['name']}")
+        
+        # Save all uploaded receipt files and process with AWS Textract
+        receipts_dir = Path(__file__).parent.parent / 'receipts'
+        receipts_dir.mkdir(exist_ok=True)
+        
+        from app.services import textract_service
+        for idx, receipt in enumerate(receipts):
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            unique_id = str(uuid.uuid4())[:8]
+            ext = Path(receipt.filename).suffix or '.jpg'
+            new_filename = f"receipt_{timestamp}_{unique_id}_{idx}{ext}"
+            file_path = receipts_dir / new_filename
+            file_content = await receipt.read()
+            file_size = len(file_content)
+            with open(file_path, 'wb') as f:
+                f.write(file_content)
+            print(f"💾 Saved receipt: {new_filename} ({file_size} bytes)")
+            # OCR with AWS Textract
+            ocr_raw_text = None
+            ocr_amount = None
+            try:
+                from app.services.extract_text_from_file import extract_text_from_file
+                ocr_result = await extract_text_from_file(str(file_path))
+                ocr_raw_text = ocr_result.get('text') if ocr_result else None
+                ocr_amount = ocr_result.get('amount') if ocr_result else None
+                ocr_vendor = ocr_result.get('vendor') if ocr_result else None
+            except Exception as ocr_err:
+                print(f"⚠️ Textract OCR failed for {new_filename}: {ocr_err}")
+                ocr_vendor = None
+            await claim_model.add_receipt(
+                claim_id=claim['id'],
+                file_path=new_filename,
+                file_name=receipt.filename,
+                file_type=receipt.content_type,
+                file_size=file_size,
+                ocr_amount=ocr_amount or amount,  # fallback to user amount
+                ocr_raw_text=ocr_raw_text,
+                message_id=None,
+                vendor=ocr_vendor
+            )
+        # Record status change
+        await claim_model.record_status_change(
+            claim_id=claim['id'],
+            from_status_code=None,
+            to_status_code='PENDING',
+            changed_by=employee['id'],
+            reason='Claim submitted via web'
+        )
+        # Get full claim details to return
+        full_claim = await claim_model.find_by_id(claim['id'])
+        # Notify manager of new claim (WhatsApp)
+        try:
+            await notification_service.notify_manager_of_new_claim(full_claim)
+        except Exception as notify_err:
+            print(f"⚠️ Failed to notify manager: {notify_err}")
+        return {
+            "success": True,
+            "message": f"Claim {claim['claim_number']} submitted successfully",
+            "claim": full_claim
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating claim: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/claims")
 async def get_claims(
     auth: dict = Depends(require_authenticated),
@@ -1430,7 +1552,7 @@ async def get_claim_receipts(claim_id: int):
         # Fetch all receipts for this claim
         receipts_query = """
             SELECT id, claim_id, file_path, file_name, file_type, file_size,
-                   ocr_amount, uploaded_at
+                   ocr_amount, ocr_raw_text, vendor, uploaded_at
             FROM claim_receipts
             WHERE claim_id = $1
             ORDER BY uploaded_at DESC

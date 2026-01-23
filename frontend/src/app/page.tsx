@@ -33,15 +33,15 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isAdmin, isManager } = useAuth();
+  const { user, isAuthenticated, isAdmin, isManager, isLoading } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [authChecked, setAuthChecked] = useState(false);
+  const [loadingStats, setLoadingStats] = useState(true);
 
   useEffect(() => {
-    // Mark auth as checked after first render
-    setAuthChecked(true);
+    // If auth is loading, do nothing yet
+    if (isLoading) return;
 
+    // Not authenticated -> Redirect to login
     if (!isAuthenticated) {
       router.push('/login');
       return;
@@ -53,8 +53,9 @@ export default function DashboardPage() {
       return;
     }
 
+    // If we're here, we are authenticated and authorized to view dashboard
     fetchStats();
-  }, [isAuthenticated, isAdmin, isManager, router]);
+  }, [isAuthenticated, isAdmin, isManager, isLoading, router]);
 
   async function fetchStats() {
     try {
@@ -69,13 +70,22 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     } finally {
-      setLoading(false);
+      setLoadingStats(false);
     }
   }
 
-  // Show loading while checking auth or fetching stats
-  if (!authChecked || loading) {
+  // Show loading while checking auth
+  if (isLoading) {
     return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  // Show loading while fetching stats
+  if (isAuthenticated && (isAdmin || isManager) && loadingStats) {
+     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import NewClaimModal from '@/components/NewClaimModal';
 
 interface Claim {
   id: number;
@@ -64,7 +65,7 @@ function getCategoryIcon(code: string): string {
 
 function MyClaimsContent() {
   const router = useRouter();
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, isLoading } = useAuth();
   
   const [claims, setClaims] = useState<Claim[]>([]);
   const [total, setTotal] = useState(0);
@@ -73,19 +74,22 @@ function MyClaimsContent() {
   const [activeStatus, setActiveStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [showNewClaimModal, setShowNewClaimModal] = useState(false);
 
   // Redirect if not authenticated
   useEffect(() => {
+    if (isLoading) return;
     if (!isAuthenticated) {
       router.push('/login');
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, isLoading]);
 
   useEffect(() => {
+    if (isLoading) return;
     if (user) {
       fetchClaims();
     }
-  }, [user, activeStatus, currentPage]);
+  }, [user, activeStatus, currentPage, isLoading]);
 
   async function fetchClaims() {
     if (!user) return;
@@ -132,13 +136,28 @@ function MyClaimsContent() {
           </p>
           <p className="text-sm text-gray-500">{total} total claims</p>
         </div>
-        <button
-          onClick={logout}
-          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-        >
-          Logout
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowNewClaimModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-medium shadow-lg"
+          >
+            + New Claim
+          </button>
+          <button
+            onClick={logout}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Logout
+          </button>
+        </div>
       </div>
+
+      {/* New Claim Modal */}
+      <NewClaimModal
+        isOpen={showNewClaimModal}
+        onClose={() => setShowNewClaimModal(false)}
+        onSuccess={() => fetchClaims()}
+      />
 
       {/* Status Filter Tabs */}
       <div className="bg-white rounded-xl shadow-md p-2 inline-flex gap-2">

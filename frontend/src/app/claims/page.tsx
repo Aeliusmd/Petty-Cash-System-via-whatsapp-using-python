@@ -1,9 +1,10 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ClaimDetailsModal from '@/components/ClaimDetailsModal';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Claim {
   id: number;
@@ -68,7 +69,11 @@ function getCategoryIcon(code: string): string {
   }
 }
 
+
+
 function ClaimsContent() {
+  const router = useRouter();
+  const { isAuthenticated, isAdmin, isManager, isLoading } = useAuth();
   const searchParams = useSearchParams();
   const statusFilter = searchParams.get('status') || '';
   
@@ -97,8 +102,20 @@ function ClaimsContent() {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
+    if (isLoading) return;
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    // Optional: add role check if needed, though API will 403
+    if (!isAdmin && !isManager) {
+        router.push('/my-claims');
+        return;
+    }
+    
     fetchEmployees();
-  }, []);
+  }, [isLoading, isAuthenticated, isAdmin, isManager, router]);
+
 
   useEffect(() => {
     fetchClaims();

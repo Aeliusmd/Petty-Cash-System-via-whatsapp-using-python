@@ -11,6 +11,8 @@ interface Receipt {
   file_type: string;
   file_size: number;
   ocr_amount: number | null;
+  ocr_raw_text: string | null;
+  vendor: string | null;
   uploaded_at: string;
 }
 
@@ -128,8 +130,9 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   }
 
   function getFileUrl(receipt: Receipt): string {
-    // Extract filename from file_path
-    const filename = receipt.file_name || receipt.file_path.split('/').pop() || '';
+    // Use file_path which contains the stored filename (e.g., receipt_20260123_abc123_0.jpg)
+    // file_name contains the original upload name, but file_path is what's actually stored
+    const filename = receipt.file_path.split('/').pop() || receipt.file_path;
     return `${API_BASE_URL}/api/receipts/${filename}`;
   }
 
@@ -337,9 +340,10 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                                 alt={receipt.file_name}
                                 className="w-full h-full object-cover"
                               />
-                              {receipt.ocr_amount && (
+                              {(receipt.ocr_amount || receipt.vendor) && (
                                 <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-2">
-                                  Amount: {formatCurrency(receipt.ocr_amount)}
+                                  {receipt.vendor && <div>Vendor: {receipt.vendor}</div>}
+                                  {receipt.ocr_amount && <div>Amount: {formatCurrency(receipt.ocr_amount)}</div>}
                                 </div>
                               )}
                             </div>

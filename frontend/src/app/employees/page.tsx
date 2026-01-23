@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Employee {
   id: number;
@@ -31,6 +33,8 @@ interface Unit { id: number; code: string; name: string; }
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 export default function EmployeesPage() {
+  const router = useRouter();
+  const { isAuthenticated, isAdmin, isManager, isLoading } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -62,9 +66,21 @@ export default function EmployeesPage() {
   });
 
   useEffect(() => {
+    if (isLoading) return;
+    
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    
+    if (!isAdmin && !isManager) {
+      router.push('/my-claims');
+      return;
+    }
+
     fetchEmployees();
     fetchDropdowns();
-  }, [roleFilter, includeInactive]);
+  }, [roleFilter, includeInactive, isLoading, isAuthenticated, isAdmin, isManager, router]);
 
   async function fetchEmployees() {
     try {

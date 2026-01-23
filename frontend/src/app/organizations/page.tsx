@@ -15,7 +15,7 @@ interface Unit {
 
 export default function OrganizationsPage() {
   const router = useRouter();
-  const { isSuperAdmin, token, enterOrganization } = useAuth();
+  const { isSuperAdmin, token, enterOrganization, isLoading } = useAuth();
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -24,6 +24,8 @@ export default function OrganizationsPage() {
   const [formData, setFormData] = useState({ code: '', name: '' });
 
   useEffect(() => {
+    if (isLoading) return;
+
     // Check super admin access
     if (!isSuperAdmin) {
       setAccessDenied(true);
@@ -33,7 +35,7 @@ export default function OrganizationsPage() {
       return;
     }
     fetchUnits();
-  }, [isSuperAdmin, router]);
+  }, [isSuperAdmin, router, isLoading]);
 
   const fetchUnits = async () => {
     try {

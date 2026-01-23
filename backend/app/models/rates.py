@@ -98,6 +98,17 @@ async def find_category(search: str) -> Optional[dict]:
     return result[0] if result else None
 
 
+async def find_category_by_id(category_id: int) -> Optional[dict]:
+    """Find category by ID"""
+    result = await db.query("""
+        SELECT id, code, name, description, requires_receipt
+        FROM claim_categories
+        WHERE id = $1 AND is_active = TRUE
+    """, category_id)
+    
+    return result[0] if result else None
+
+
 async def get_all_grades() -> list[dict]:
     """Get all grades"""
     return await db.query("""

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
-interface Unit {
+interface Organization {
   id: number;
   code: string;
   name: string;
@@ -16,11 +16,11 @@ interface Unit {
 export default function OrganizationsPage() {
   const router = useRouter();
   const { isSuperAdmin, token, enterOrganization, isLoading } = useAuth();
-  const [units, setUnits] = useState<Unit[]>([]);
+  const [units, setUnits] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
+  const [editingUnit, setEditingUnit] = useState<Organization | null>(null);
   const [formData, setFormData] = useState({ code: '', name: '' });
 
   useEffect(() => {
@@ -40,13 +40,23 @@ export default function OrganizationsPage() {
   const fetchUnits = async () => {
     try {
       const authToken = localStorage.getItem('auth_token');
-      const res = await fetch('http://localhost:4101/api/units', {
+      const res = await fetch('http://localhost:4101/api/organizations', {
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
       const data = await res.json();
-      setUnits(data.units || data || []);
+      
+      // Ensure we always set an array
+      if (Array.isArray(data)) {
+        setUnits(data);
+      } else if (data.organizations && Array.isArray(data.organizations)) {
+        setUnits(data.organizations);
+      } else {
+        console.error('Unexpected API response format:', data);
+        setUnits([]);
+      }
     } catch (error) {
       console.error('Error fetching units:', error);
+      setUnits([]);
     } finally {
       setLoading(false);
     }
@@ -57,8 +67,8 @@ export default function OrganizationsPage() {
     try {
       const authToken = localStorage.getItem('auth_token');
       const url = editingUnit 
-        ? `http://localhost:4101/api/units/${editingUnit.id}`
-        : 'http://localhost:4101/api/units';
+        ? `http://localhost:4101/api/organizations/${editingUnit.id}`
+        : 'http://localhost:4101/api/organizations';
       
       const res = await fetch(url, {
         method: editingUnit ? 'PUT' : 'POST',
@@ -85,7 +95,7 @@ export default function OrganizationsPage() {
     
     try {
       const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`http://localhost:4101/api/units/${id}`, {
+      const res = await fetch(`http://localhost:4101/api/organizations/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${authToken}` }
       });

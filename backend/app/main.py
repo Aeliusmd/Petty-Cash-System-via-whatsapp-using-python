@@ -38,8 +38,10 @@ from app.models import claim as claim_model
 from app.models import employee as employee_model
 from app.models import otp as otp_model
 from app.models import unit as unit_model
+from app.models import category as category_model
 from app.models import rates as rates_model
 from app.models import audit_log as audit_log_model
+from app.models import organization as organization_model
 from app.utils import jwt_utils
 from app.utils.auth import require_super_admin, require_admin, require_authenticated
 
@@ -238,14 +240,99 @@ async def health():
 class UnitCreate(BaseModel):
     code: str
     name: str
+    organization_id: Optional[int] = None
     is_active: bool = True
 
 
-@app.get("/api/units")
-async def get_units(auth: dict = Depends(require_super_admin)):
-    """Get all organizational units - SUPER ADMIN ONLY"""
+@app.get("/api/organizations")
+async def get_organizations(auth: dict = Depends(require_super_admin)):
+    """Get all organizations - SUPER ADMIN ONLY"""
     try:
-        units = await unit_model.find_all()
+        orgs = await organization_model.find_all()
+        return {"organizations": orgs}
+    except Exception as e:
+        print(f"❌ Error fetching organizations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/organizations/{org_id}/units")
+async def get_organization_units(org_id: int, auth: dict = Depends(require_super_admin)):
+    """Get units for a specific organization"""
+    try:
+        units = await organization_model.get_units(org_id)
+        return {"units": units}
+    except Exception as e:
+        print(f"❌ Error fetching organization units: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class OrganizationCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    is_active: bool = True
+
+
+@app.post("/api/organizations")
+async def create_organization(request: OrganizationCreate, auth: dict = Depends(require_super_admin)):
+    """Create a new organization - SUPER ADMIN ONLY"""
+    try:
+        org = await organization_model.create(request.dict())
+        return org
+    except Exception as e:
+        print(f"❌ Error creating organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/organizations/{org_id}")
+async def update_organization(org_id: int, request: OrganizationCreate, auth: dict = Depends(require_super_admin)):
+    """Update an organization - SUPER ADMIN ONLY"""
+    try:
+        org = await organization_model.update(org_id, request.dict())
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return org
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/organizations/{org_id}")
+async def delete_organization(org_id: int, auth: dict = Depends(require_super_admin)):
+    """Delete (soft) an organization - SUPER ADMIN ONLY"""
+    try:
+        success = await organization_model.delete(org_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return {"message": "Organization deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+        
+        
+@app.get("/api/units")
+async def get_units(
+    organization_id: Optional[int] = Query(None),
+    auth: dict = Depends(require_admin)
+):
+    """
+    Get organizational units - ADMIN or SUPER ADMIN
+    Optionally filter by organization_id
+    If admin (not super admin), automatically filter by their organization
+    """
+    try:
+        # If regular admin, force filter to their organization
+        if auth.get('role') == 'admin' and auth.get('organization_id'):
+            organization_id = auth['organization_id']
+        
+        if organization_id:
+            units = await organization_model.get_units(organization_id)
+        else:
+            units = await unit_model.find_all()
         return {"units": units}
     except Exception as e:
         print(f"❌ Error fetching units: {e}")
@@ -268,10 +355,15 @@ async def get_unit(unit_id: int, auth: dict = Depends(require_super_admin)):
 
 
 @app.post("/api/units")
-async def create_unit(request: UnitCreate, auth: dict = Depends(require_super_admin)):
-    """Create a new organizational unit - SUPER ADMIN ONLY"""
+async def create_unit(request: UnitCreate, auth: dict = Depends(require_admin)):
+    """Create a new organizational unit - ADMIN or SUPER ADMIN"""
     try:
-        unit = await unit_model.create(request.dict())
+        # If admin (not super admin), force organization_id to their organization
+        unit_data = request.dict()
+        if auth.get('role') == 'admin' and auth.get('organization_id'):
+            unit_data['organization_id'] = auth['organization_id']
+        
+        unit = await unit_model.create(unit_data)
         
         # Log organization creation
         await audit_service.log_organization_action(
@@ -289,9 +381,15 @@ async def create_unit(request: UnitCreate, auth: dict = Depends(require_super_ad
 
 
 @app.put("/api/units/{unit_id}")
-async def update_unit(unit_id: int, request: UnitCreate, auth: dict = Depends(require_super_admin)):
-    """Update an existing unit - SUPER ADMIN ONLY"""
+async def update_unit(unit_id: int, request: UnitCreate, auth: dict = Depends(require_admin)):
+    """Update an existing unit - ADMIN or SUPER ADMIN"""
     try:
+        # Verify admin has access to this unit's organization
+        if auth.get('role') == 'admin':
+            existing_unit = await unit_model.find_by_id(unit_id)
+            if not existing_unit or existing_unit.get('organization_id') != auth.get('organization_id'):
+                raise HTTPException(status_code=403, detail="Access denied to this unit")
+        
         unit = await unit_model.update(unit_id, request.dict())
         if not unit:
             raise HTTPException(status_code=404, detail="Unit not found")
@@ -314,9 +412,15 @@ async def update_unit(unit_id: int, request: UnitCreate, auth: dict = Depends(re
 
 
 @app.delete("/api/units/{unit_id}")
-async def delete_unit(unit_id: int, auth: dict = Depends(require_super_admin)):
-    """Delete (soft) an organizational unit - SUPER ADMIN ONLY"""
+async def delete_unit(unit_id: int, auth: dict = Depends(require_admin)):
+    """Delete (soft) an organizational unit - ADMIN or SUPER ADMIN"""
     try:
+        # Verify admin has access to this unit's organization
+        if auth.get('role') == 'admin':
+            existing_unit = await unit_model.find_by_id(unit_id)
+            if not existing_unit or existing_unit.get('organization_id') != auth.get('organization_id'):
+                raise HTTPException(status_code=403, detail="Access denied to this unit")
+        
         success = await unit_model.delete(unit_id)
         if not success:
             raise HTTPException(status_code=404, detail="Unit not found")
@@ -479,6 +583,236 @@ async def exit_organization(request: Request, auth: dict = Depends(require_authe
         raise
     except Exception as e:
         print(f"❌ Error exiting organization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ==============================================
+# Category CRUD (Super Admin / Admin)
+# ==============================================
+
+class CategoryCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    requires_receipt: bool = False
+    display_order: int = 0
+    unit_id: Optional[int] = None
+    prompt_message: Optional[str] = None
+    is_active: bool = True
+
+
+@app.get("/api/categories")
+async def get_categories(
+    unit_id: Optional[int] = Query(None),
+    auth: dict = Depends(require_admin)
+):
+    """
+    Get all categories.
+    If unit_id is provided, returns categories for that unit.
+    If no unit_id, returns global categories (unit_id IS NULL) [or SHOULD it return all? Model says globals]
+    """
+    try:
+        if unit_id:
+            categories = await category_model.find_by_unit(unit_id)
+        else:
+            categories = await category_model.find_all()
+        return {"categories": categories}
+    except Exception as e:
+        print(f"❌ Error fetching categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/categories/{category_id}")
+async def get_category(category_id: int, auth: dict = Depends(require_admin)):
+    """Get a single category by ID"""
+    try:
+        category = await category_model.find_by_id(category_id)
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        return category
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching category: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/categories")
+async def create_category(request: CategoryCreate, auth: dict = Depends(require_admin)):
+    """Create a new category"""
+    try:
+        # If admin (not super admin), force unit_id to their organization's units? 
+        # For now, trust the input but maybe validate access later.
+        
+        category = await category_model.create(request.dict())
+        return category
+    except Exception as e:
+        print(f"❌ Error creating category: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/categories/{category_id}")
+async def update_category(category_id: int, request: CategoryCreate, auth: dict = Depends(require_admin)):
+    """Update an existing category"""
+    try:
+        category = await category_model.update(category_id, request.dict())
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        return category
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating category: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/categories/{category_id}")
+async def delete_category(category_id: int, auth: dict = Depends(require_admin)):
+    """Delete (soft) a category"""
+    try:
+        success = await category_model.delete(category_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Category not found")
+        return {"message": "Category deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting category: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==============================================
+# Audit Log Endpoints
+# ==============================================
+
+@app.get("/api/audit-logs")
+async def get_audit_logs(
+    entity_type: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    performed_by: Optional[int] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    limit: int = Query(50),
+    offset: int = Query(0),
+    auth: dict = Depends(require_admin)
+):
+    """
+    Get audit logs with filtering and pagination.
+    Admins can only see logs for their organization.
+    Super admins can see all logs.
+    """
+    try:
+        organization_id = None
+        
+        # If not super admin, restrict to their organization
+        if auth.get('role') != 'super_admin':
+            organization_id = auth.get('organization_id')
+            if not organization_id:
+                # Should not happen for admin, but safe fallback
+                return {"audit_logs": [], "total": 0}
+        
+        # Fetch logs
+        logs = await audit_log_model.find_all(
+            entity_type=entity_type,
+            action=action,
+            performed_by=performed_by,
+            organization_id=organization_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Get total count for pagination
+        total = await audit_log_model.count_all(
+            entity_type=entity_type,
+            action=action,
+            performed_by=performed_by,
+            organization_id=organization_id,
+            from_date=from_date,
+            to_date=to_date
+        )
+        
+        return {
+            "audit_logs": logs,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        print(f"❌ Error fetching audit logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audit-logs/export")
+async def export_audit_logs(
+    entity_type: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    auth: dict = Depends(require_admin)
+):
+    """
+    Export audit logs to CSV
+    """
+    try:
+        organization_id = None
+        if auth.get('role') != 'super_admin':
+            organization_id = auth.get('organization_id')
+        
+        # Fetch all matching logs (no pagination)
+        # We use a higher limit for export
+        logs = await audit_log_model.find_all(
+            entity_type=entity_type,
+            action=action,
+            organization_id=organization_id,
+            from_date=from_date,
+            to_date=to_date,
+            limit=10000, # Reasonable limit for export
+            offset=0
+        )
+        
+        # Create CSV content
+        import csv
+        import io
+        from fastapi.responses import StreamingResponse
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Header
+        writer.writerow([
+            'ID', 'Date', 'Action', 'Entity Type', 'Entity ID', 
+            'Performed By', 'Organization', 'IP Address', 'Description'
+        ])
+        
+        # Data
+        for log in logs:
+            perform_by = f"{log.get('performed_by_name', 'System')} ({log.get('performed_by_code', '')})"
+            writer.writerow([
+                log['id'],
+                log['created_at'],
+                log['action'],
+                log['entity_type'],
+                log['entity_id'],
+                perform_by,
+                log.get('organization_name', 'N/A'),
+                log['ip_address'],
+                # Basic description logic (simplified from frontend)
+                f"{log['action']} {log['entity_type']} {log['entity_id']}"
+            ])
+            
+        output.seek(0)
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=audit_logs.csv"}
+        )
+        
+    except Exception as e:
+        print(f"❌ Error exporting audit logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

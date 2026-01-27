@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # Add backend to path
-sys.path.insert(0, str(Path(__file__).parent / 'backend'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'backend'))
 
 from dotenv import load_dotenv
 load_dotenv('.env')
@@ -59,7 +59,7 @@ def setup():
         conn.autocommit = True
         cur = conn.cursor()
         
-        db_dir = Path(__file__).parent / 'backend' / 'app' / 'db'
+        db_dir = Path(__file__).parent.parent / 'backend' / 'app' / 'db'
         
         # Run schema
         print('\n3️⃣ Running schema.sql...')

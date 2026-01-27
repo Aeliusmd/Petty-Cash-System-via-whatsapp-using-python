@@ -167,28 +167,57 @@ async def create(data: dict) -> dict:
 
 
 async def update(employee_id: int, data: dict) -> dict:
-    """Update employee"""
-    result = await db.query("""
-        UPDATE employees SET
-            employee_code = COALESCE($1, employee_code),
-            name = COALESCE($2, name),
-            phone_number = COALESCE($3, phone_number),
-            email = COALESCE($4, email),
-            grade_id = COALESCE($5, grade_id),
-            unit_id = COALESCE($6, unit_id),
-            location_id = COALESCE($7, location_id),
-            manager_id = $8,
-            role = COALESCE($9, role),
-            is_active = COALESCE($10, is_active),
-            is_admin = COALESCE($12, is_admin),
-            is_manager = COALESCE($13, is_manager),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $11 RETURNING *
-    """, data.get('employee_code'), data.get('name'), data.get('phone_number'),
-        data.get('email'), data.get('grade_id'), data.get('unit_id'),
-        data.get('location_id'), data.get('manager_id'), data.get('role'),
-        data.get('is_active'), employee_id, 
-        data.get('is_admin'), data.get('is_manager'))
+    """
+    Update employee with dynamic query generation.
+    Only updates fields present in the data dictionary.
+    Allows setting fields to None (NULL).
+    """
+    if not data:
+        return await find_by_id(employee_id)
+        
+    # Map of allowed fields to column names (if different, otherwise same)
+    # This prevents SQL injection by whitelisting columns
+    valid_fields = {
+        'employee_code': 'employee_code',
+        'name': 'name',
+        'phone_number': 'phone_number',
+        'email': 'email',
+        'grade_id': 'grade_id',
+        'unit_id': 'unit_id',
+        'location_id': 'location_id',
+        'manager_id': 'manager_id',
+        'role': 'role',
+        'is_active': 'is_active',
+        'is_admin': 'is_admin',
+        'is_manager': 'is_manager'
+    }
+    
+    set_clauses = []
+    values = []
+    param_idx = 1
+    
+    # Always update updated_at
+    set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+    
+    for key, value in data.items():
+        if key in valid_fields:
+            column = valid_fields[key]
+            set_clauses.append(f"{column} = ${param_idx}")
+            values.append(value)
+            param_idx += 1
+            
+    if not set_clauses:
+        return await find_by_id(employee_id)
+        
+    query = f"""
+        UPDATE employees 
+        SET {', '.join(set_clauses)}
+        WHERE id = ${param_idx} 
+        RETURNING *
+    """
+    values.append(employee_id)
+    
+    result = await db.query(query, *values)
     
     return result[0] if result else None
 

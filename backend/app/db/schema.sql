@@ -17,11 +17,23 @@ CREATE TABLE IF NOT EXISTS grades (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Organizations
+CREATE TABLE IF NOT EXISTS organizations (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(20) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Organizational Units / Departments
 CREATE TABLE IF NOT EXISTS units (
     id SERIAL PRIMARY KEY,
     code VARCHAR(20) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
+    organization_id INT REFERENCES organizations(id),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -46,6 +58,7 @@ CREATE TABLE IF NOT EXISTS claim_categories (
     requires_receipt BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
     display_order INT DEFAULT 0,
+    unit_id INT REFERENCES units(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -324,7 +337,7 @@ DO $$
 DECLARE
     t TEXT;
 BEGIN
-    FOR t IN SELECT unnest(ARRAY['grades', 'units', 'locations', 'claim_categories', 
+    FOR t IN SELECT unnest(ARRAY['grades', 'organizations', 'units', 'locations', 'claim_categories', 
                                   'employees', 'batta_rates', 'category_caps', 
                                   'claims', 'conversation_states'])
     LOOP

@@ -77,6 +77,13 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                       </Link>
                     )}
                     
+                    {/* Settings - Admin only */}
+                    {isAdmin && (
+                      <Link href="/settings" className="hover:text-indigo-200 transition-colors font-medium">
+                        ⚙️ Settings
+                      </Link>
+                    )}
+                    
                     {/* Audit Logs - Admin only */}
                     {isAdmin && (
                       <Link href="/audit-logs" className="hover:text-indigo-200 transition-colors font-medium">
@@ -118,7 +125,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-900 text-gray-100`}
       >

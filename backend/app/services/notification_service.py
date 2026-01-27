@@ -336,6 +336,14 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
             
             if total_from_receipts > 0:
                 receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
+                
+                # Validation: Check if receipts match claim amount
+                if amount > 0:
+                    diff = abs(total_from_receipts - amount)
+                    diff_pct = (diff / amount) * 100
+                    
+                    if diff_pct > 5:  # Alert if difference is > 5%
+                        receipt_section += f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
         else:
             receipt_section = "\n\n🧾 Receipt: Not provided"
         

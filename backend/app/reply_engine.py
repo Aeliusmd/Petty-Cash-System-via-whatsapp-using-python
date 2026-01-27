@@ -16,6 +16,7 @@ from app.models import employee as employee_model
 from app.models import rates as rates_model
 from app.models import claim as claim_model
 from app.models import conversation as conversation_model
+from app.models import category as category_model
 from app.services.location_service import location_service
 from app import waha_client
 
@@ -106,6 +107,61 @@ def extract_amount(text: str) -> Optional[float]:
 def format_currency(amount: float) -> str:
     """Format amount as currency string"""
     return f"Rs.{amount:,.0f}"
+
+
+# Number emoji mapping for dynamic menus
+NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+
+
+async def get_categories_for_employee(employee: dict) -> list:
+    """Get categories available for an employee based on their unit"""
+    unit_id = employee.get('unit_id')
+    if unit_id:
+        categories = await category_model.find_by_unit(unit_id)
+        if categories:
+            return categories
+    # Fallback to global categories if unit has none
+    return await category_model.find_all()
+
+
+def generate_category_menu(categories: list) -> str:
+    """Generate a formatted category menu string"""
+    if not categories:
+        return "No categories available. Please contact admin."
+    
+    menu_lines = []
+    for i, cat in enumerate(categories):
+        emoji = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"{i+1}."
+        menu_lines.append(f"{emoji} {cat['name']}")
+    
+    return '\n'.join(menu_lines)
+
+
+def match_category_from_input(text: str, categories: list) -> dict | None:
+    """Match user input to a category from the list"""
+    if not categories:
+        return None
+    
+    text_lower = text.lower().strip()
+    
+    # Try to match by number (1, 2, 3...)
+    try:
+        num = int(text_lower)
+        if 1 <= num <= len(categories):
+            return categories[num - 1]
+    except ValueError:
+        pass
+    
+    # Try to match by name or code (partial match)
+    for cat in categories:
+        cat_name_lower = cat['name'].lower()
+        cat_code_lower = cat['code'].lower()
+        if cat_name_lower in text_lower or text_lower in cat_name_lower:
+            return cat
+        if cat_code_lower in text_lower or text_lower in cat_code_lower:
+            return cat
+    
+    return None
 
 
 async def generate_reply(message_text: str, chat_id: str, media_info: dict = None) -> Optional[str]:
@@ -324,10 +380,14 @@ The employee has been notified and can appeal."""
 
     # ===== HANDLE GREETINGS - SHOW MAIN MENU =====
     if text in ('hi', 'hello', 'hey', 'menu', 'start'):
+        # Get categories for this employee's unit
+        categories = await get_categories_for_employee(employee)
+        category_menu = generate_category_menu(categories)
+        
         await conversation_model.update(chat_id, {
             'current_step': 'menu',
             'category': None,
-            'context': {}
+            'context': {'available_categories': [cat['id'] for cat in categories]}
         })
         
         return f"""🙏 Welcome, *{employee['name']}*!
@@ -335,10 +395,7 @@ The employee has been notified and can appeal."""
 You are registered as Grade {employee.get('grade_code') or 'N/A'} at {employee.get('location_name') or 'N/A'}.
 
 Please select a category:
-1️⃣ Batta (Daily Allowance)
-2️⃣ Fuel Expenses
-3️⃣ Accommodation
-4️⃣ Sundry Expenses
+{category_menu}
 
 Reply with the number or category name."""
 
@@ -479,6 +536,10 @@ Type *confirm* to submit or *menu* to start over."""
 
         # If not in any flow (and not in receipt_upload), ask which category to use
         else:
+            # Get categories for this employee
+            categories = await get_categories_for_employee(employee)
+            category_menu = generate_category_menu(categories)
+            
             await conversation_model.update(chat_id, {
                 'current_step': 'receipt_category',
                 'context': {
@@ -487,7 +548,8 @@ Type *confirm* to submit or *menu* to start over."""
                     'user_amount': amount,
                     'extracted_text': extracted_text[:500],
                     'has_receipt': True,
-                    'media_info': media_info  # Store media for forwarding to manager
+                    'media_info': media_info,  # Store media for forwarding to manager
+                    'available_categories': [cat['id'] for cat in categories]
                 }
             })
             
@@ -498,37 +560,30 @@ Type *confirm* to submit or *menu* to start over."""
 💰 Amount: {format_currency(amount) if amount else 'Not detected'}
 
 Which category is this receipt for?
-2️⃣ Fuel Expenses
-3️⃣ Accommodation
-4️⃣ Sundry Expenses
+{category_menu}
 
 Reply with the number."""
 
     # Handle receipt category selection
     if state.get('current_step') == 'receipt_category':
-        category = None
-        category_name = ''
+        # Get available categories from context or fetch fresh
+        available_ids = context.get('available_categories')
+        all_categories = []
         
-        if text == '2' or 'fuel' in text:
-            category = 'FUEL'
-            category_name = 'Fuel Expense'
-        elif text == '3' or 'accommodation' in text or 'hotel' in text:
-            category = 'ACCOM'
-            category_name = 'Accommodation'
-        elif text == '4' or 'sundry' in text or 'other' in text:
-            category = 'SUNDRY'
-            category_name = 'Sundry Expense'
+        if available_ids:
+            all_categories = await get_categories_for_employee(employee)
+        else:
+            all_categories = await get_categories_for_employee(employee)
+            
+        selected_cat = match_category_from_input(text, all_categories)
         
-        if not category:
+        if not selected_cat:
             return """❌ *Invalid Selection*
 
-Please select a valid category:
-
-2️⃣ *Fuel Expenses*
-3️⃣ *Accommodation*
-4️⃣ *Sundry Expenses*
-
-Reply with the number (2, 3, or 4)."""
+Please select a valid category number or name."""
+        
+        category = selected_cat['code'] # Use dynamic code
+        category_name = selected_cat['name']
         
         await conversation_model.update(chat_id, {
             'current_step': 'confirm',
@@ -546,44 +601,68 @@ Reply with the number (2, 3, or 4)."""
 
 Type *confirm* to submit or *menu* to start over."""
 
-    # Handle greetings - show main menu
+    # Handle greetings (duplicated check, kept for safety but using new logic)
     if text in ('hi', 'hello', 'hey', 'menu', 'start'):
+        # Get categories for this employee's unit
+        categories = await get_categories_for_employee(employee)
+        category_menu = generate_category_menu(categories)
+        
         await conversation_model.update(chat_id, {
             'current_step': 'menu',
             'category': None,
-            'context': {}
+            'context': {'available_categories': [cat['id'] for cat in categories]}
         })
-        
-        grade = employee.get('grade_code', 'N/A')
-        location = employee.get('location_name', 'N/A')
         
         return f"""🙏 Welcome, *{employee['name']}*!
 
-You are registered as Grade {grade} at {location}.
+You are registered as Grade {employee.get('grade_code') or 'N/A'} at {employee.get('location_name') or 'N/A'}.
 
 Please select a category:
-1️⃣ Batta (Daily Allowance)
-2️⃣ Fuel Expenses
-3️⃣ Accommodation
-4️⃣ Sundry Expenses
+{category_menu}
 
 Reply with the number or category name."""
 
     # Handle category selection from menu
     current_step = state.get('current_step', 'initial')
     if current_step in ('menu', 'initial'):
-        # Batta
-        if text == '1' or 'batta' in text or 'daily' in text:
-            locations = await rates_model.get_all_locations()
-            location_list = '\n'.join(f"• {loc['name']}" for loc in locations)
+        # Get available categories from context or fetch fresh
+        available_ids = context.get('available_categories')
+        all_categories = []
+        
+        if available_ids:
+            # We have IDs in context (optimized), but we need full objects for matching
+            # So we just fetch for employee again as it's safer and fast enough
+            all_categories = await get_categories_for_employee(employee)
+        else:
+            all_categories = await get_categories_for_employee(employee)
             
-            await conversation_model.update(chat_id, {
-                'current_step': 'batta_location',
-                'category': 'BATTA',
-                'context': {}
-            })
+        # Match input to category
+        selected_cat = match_category_from_input(text, all_categories)
+        
+        if selected_cat:
+            cat_code = selected_cat['code']
             
-            return f"""📍 *Batta Claim*
+            # Map old hardcoded codes to new DB codes if needed, or use DB codes directly
+            # We assume DB codes will be: BATTA, FUEL, ACCOM, SUNDRY (or similar)
+            
+            # Check for custom prompt from DB
+            custom_prompt = selected_cat.get('prompt_message')
+            
+            # ===== BATTA FLOW =====
+            if 'BATTA' in cat_code or 'DAILY' in cat_code:
+                locations = await rates_model.get_all_locations()
+                location_list = '\n'.join(f"• {loc['name']}" for loc in locations)
+                
+                await conversation_model.update(chat_id, {
+                    'current_step': 'batta_location',
+                    'category': 'BATTA',
+                    'context': {'category_id': selected_cat['id']}
+                })
+                
+                if custom_prompt:
+                    return custom_prompt
+                
+                return f"""📍 *{selected_cat['name']}*
 
 Please enter the *location* for your travel:
 
@@ -591,15 +670,18 @@ Please enter the *location* for your travel:
 
 Example: "Kandy" or "Colombo\""""
 
-        # Fuel
-        if text == '2' or 'fuel' in text or 'petrol' in text or 'diesel' in text:
-            await conversation_model.update(chat_id, {
-                'current_step': 'fuel_details',
-                'category': 'FUEL',
-                'context': {}
-            })
-            
-            return """⛽ *Fuel Expense*
+            # ===== FUEL FLOW =====
+            elif 'FUEL' in cat_code or 'PETROL' in cat_code:
+                await conversation_model.update(chat_id, {
+                    'current_step': 'fuel_details',
+                    'category': 'FUEL',
+                    'context': {'category_id': selected_cat['id']}
+                })
+                
+                if custom_prompt:
+                    return custom_prompt
+                
+                return f"""⛽ *{selected_cat['name']}*
 
 Please provide the details:
 • Vehicle number
@@ -608,15 +690,18 @@ Please provide the details:
 
 Example: "CAB-1234, Rs.5000, Field visit to Kandy\""""
 
-        # Accommodation
-        if text == '3' or 'accommodation' in text or 'hotel' in text or 'stay' in text:
-            await conversation_model.update(chat_id, {
-                'current_step': 'accommodation_details',
-                'category': 'ACCOM',
-                'context': {}
-            })
-            
-            return """🏨 *Accommodation Claim*
+            # ===== ACCOMMODATION FLOW =====
+            elif 'ACCOM' in cat_code or 'HOTEL' in cat_code:
+                await conversation_model.update(chat_id, {
+                    'current_step': 'accommodation_details',
+                    'category': 'ACCOM',
+                    'context': {'category_id': selected_cat['id']}
+                })
+                
+                if custom_prompt:
+                    return custom_prompt
+                
+                return f"""🏨 *{selected_cat['name']}*
 
 Please provide:
 • Hotel/place name
@@ -626,22 +711,24 @@ Please provide:
 
 Example: "Grand Hotel, Galle, 2 nights, Rs.6000\""""
 
-        # Sundry
-        if text == '4' or 'sundry' in text or 'other' in text or 'misc' in text:
-            await conversation_model.update(chat_id, {
-                'current_step': 'sundry_details',
-                'category': 'SUNDRY',
-                'context': {}
-            })
-            
-            return """📦 *Sundry Expenses*
+            # ===== SUNDRY/GENERAL FLOW (Default) =====
+            else:
+                # Default flow for any other category (Sundry etc.)
+                await conversation_model.update(chat_id, {
+                    'current_step': 'sundry_details',
+                    'category': cat_code, # Use the dynamic code
+                    'context': {'category_id': selected_cat['id']}
+                })
+                
+                if custom_prompt:
+                    return custom_prompt
+                    
+                cat_name = selected_cat['name']
+                return f"📦 *{cat_name}*\n\nPlease describe:\n• What was purchased\n• Amount\n• Purpose\n\nExample: 'Stationery supplies, Rs.1500, Office use'"
+        # If no match found
+        if current_step == 'menu':
+             return """❌ Invalid selection. Please reply with the *number* or *name* of the category."""
 
-Please describe:
-• What was purchased
-• Amount
-• Purpose
-
-Example: "Stationery supplies, Rs.1500, Office use\""""
 
     # ===== BATTA FLOW =====
     if current_step == 'batta_location':
@@ -658,13 +745,15 @@ Example: "Colombo", "Kandy", "Galle", etc."""
         if not rate:
             return f"⚠️ No batta rate found for Grade {employee.get('grade_code')} at {location['name']}. Please contact admin."
 
+        context.update({
+            'location_id': location['id'],
+            'location_name': location['name'],
+            'rate_per_day': rate
+        })
+        
         await conversation_model.update(chat_id, {
             'current_step': 'batta_days',
-            'context': {
-                'location_id': location['id'],
-                'location_name': location['name'],
-                'rate_per_day': rate
-            }
+            'context': context
         })
 
         return f"""📍 Location: *{location['name']}*
@@ -686,13 +775,14 @@ How many days?"""
         rate_per_day = context.get('rate_per_day', 0)
         total_amount = rate_per_day * days
 
+        context.update({
+            'days': days,
+            'total_amount': total_amount
+        })
+
         await conversation_model.update(chat_id, {
             'current_step': 'receipt_upload',
-            'context': {
-                **context,
-                'days': days,
-                'total_amount': total_amount
-            }
+            'context': context
         })
 
         return f"""✅ *Batta Claim Details*
@@ -710,12 +800,14 @@ Or type *skip* if you don't have any."""
     if current_step == 'fuel_details':
         amount = extract_amount(text)
         
+        context.update({
+            'details': message_text,
+            'user_amount': amount
+        })
+
         await conversation_model.update(chat_id, {
             'current_step': 'receipt_upload',
-            'context': {
-                'details': message_text,
-                'user_amount': amount
-            }
+            'context': context
         })
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
@@ -733,14 +825,16 @@ Or type *skip* if you don't have any."""
         amount = extract_amount(text)
         location = await find_location_in_text(text)
         
+        context.update({
+            'details': message_text,
+            'user_amount': amount,
+            'location_id': location['id'] if location else None,
+            'location_name': location['name'] if location else None
+        })
+        
         await conversation_model.update(chat_id, {
             'current_step': 'receipt_upload',
-            'context': {
-                'details': message_text,
-                'user_amount': amount,
-                'location_id': location['id'] if location else None,
-                'location_name': location['name'] if location else None
-            }
+            'context': context
         })
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
@@ -757,17 +851,34 @@ Or type *skip* if you don't have any."""
     if current_step == 'sundry_details':
         amount = extract_amount(text)
         
+        # Determine category name for valid display
+        category_code = state.get('category', 'Expense')
+        category_name = category_code
+        
+        # Try to look up nice name if we have ID
+        cat_id = context.get('category_id')
+        if cat_id:
+            try:
+                cat_obj = await category_model.find_by_id(cat_id)
+                if cat_obj:
+                    category_name = cat_obj['name']
+            except:
+                pass
+
+        context.update({
+            'details': message_text,
+            'user_amount': amount,
+            'category_name': category_name  # Store for later
+        })
+
         await conversation_model.update(chat_id, {
             'current_step': 'receipt_upload',
-            'context': {
-                'details': message_text,
-                'user_amount': amount
-            }
+            'context': context
         })
 
         amount_line = f"\n💵 Amount: {format_currency(amount)}" if amount else ''
 
-        return f"""✅ *Sundry Expense Details*
+        return f"""✅ *{category_name} Details*
 
 👤 Employee: {employee['name']}
 📝 Details: {message_text}{amount_line}
@@ -800,10 +911,22 @@ Or type:
             
             # Build summary with all receipts
             category_code = state.get('category')
+            
+            # Helper to get category name
+            category_name = category_code
+            cat_id = context.get('category_id')
+            if cat_id:
+                try:
+                    cat_obj = await category_model.find_by_id(cat_id)
+                    if cat_obj:
+                        category_name = cat_obj['name']
+                except:
+                    pass
+
             summary = f"""✅ *Claim Summary*
 
 👤 Employee: {employee['name']}
-📁 Category: {category_code}
+📁 Category: {category_name}
 📝 Details: {context.get('details', 'N/A')}"""
             
             if context.get('location_name'):
@@ -847,10 +970,22 @@ Or type:
             })
             
             category_code = state.get('category')
+            
+            # Helper to get category name
+            category_name = category_code
+            cat_id = context.get('category_id')
+            if cat_id:
+                try:
+                    cat_obj = await category_model.find_by_id(cat_id)
+                    if cat_obj:
+                        category_name = cat_obj['name']
+                except:
+                    pass
+
             summary = f"""✅ *Claim Summary*
 
 👤 Employee: {employee['name']}
-📁 Category: {category_code}
+📁 Category: {category_name}
 📝 Details: {context.get('details', 'N/A')}"""
             
             display_amount = context.get('total_amount') or context.get('user_amount')
@@ -966,7 +1101,22 @@ Or type:
             try:
                 # Get category ID
                 category_code = state.get('category')
-                category = await rates_model.find_category(category_code)
+                
+                # Use find_category to accept code or name
+                # PRIORITIZE correct ID from context if available
+                category = None
+                cat_id = context.get('category_id')
+                
+                if cat_id:
+                    try:
+                        category = await category_model.find_by_id(cat_id)
+                    except:
+                        pass
+                
+                # Fallback to code lookup (legacy or if context lost)
+                if not category:
+                    category = await rates_model.find_category(category_code)
+                
                 if not category:
                     return '❌ Error: Category not found. Type "menu" to start over.'
 
@@ -1054,11 +1204,27 @@ Or type:
 
                 final_amount = claim.get('system_amount') or claim.get('user_amount') or 0
 
+                # Use verified category name from lookup
+                category_name = category['name'] if category else 'Expense'
+                
+                # Check for difference again to show in final message
+                diff_section = ""
+                # Receipts from context are floats (JSON), Claim amount is Decimal (DB)
+                # Must cast to float for comparison
+                val_final_amount = float(final_amount)
+                receipt_total = sum(float(r.get('ocr_amount', 0)) for r in receipts)
+                
+                if receipt_total > 0 and val_final_amount > 0:
+                     diff = abs(receipt_total - val_final_amount)
+                     diff_pct = (diff / val_final_amount) * 100
+                     if diff_pct > 5:
+                         diff_section = f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
+
                 return f"""🎉 *Claim Submitted Successfully!*
 
 📋 Claim #: *{claim['claim_number']}*
-📁 Category: {category['name']}
-💵 Amount: {format_currency(final_amount)}{manager_notice}
+📁 Category: {category_name}
+💵 Amount: {format_currency(final_amount)}{diff_section}{manager_notice}
 
 Type "menu" to submit another claim."""
 

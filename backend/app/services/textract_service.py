@@ -148,8 +148,9 @@ async def extract_expense_from_image(image_buffer: bytes) -> dict:
         
         return {
             'success': True,
-            'expenses': expenses,
-            'fullText': unique_text,
+            'expense': expenses[0] if expenses else {},
+            'text': unique_text,
+            'raw': response,
             'documentCount': len(expenses)
         }
     except Exception as e:

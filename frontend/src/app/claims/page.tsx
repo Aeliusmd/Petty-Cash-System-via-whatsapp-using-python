@@ -42,7 +42,11 @@ function formatCurrency(amount: number | null): string {
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-LK', {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '-';
+  
+  return date.toLocaleDateString('en-LK', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -443,7 +447,7 @@ function ClaimsContent() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
-                      {formatDate(claim.created_at)}
+                      {formatDate(claim.claim_date || claim.created_at)}
                     </td>
                     <td className="px-6 py-4">
                       <button

@@ -62,7 +62,7 @@ export default function EmployeesPage() {
     location_id: '',
     unit_id: '',
     manager_id: '',
-    role: 'staff',
+    role: 'employee',
   });
 
   useEffect(() => {
@@ -141,7 +141,7 @@ export default function EmployeesPage() {
       location_id: '',
       unit_id: '',
       manager_id: '',
-      role: 'staff',
+      role: 'employee',
     });
     setShowModal(true);
   }
@@ -274,7 +274,7 @@ export default function EmployeesPage() {
           className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
         >
           <option value="">All Roles</option>
-          <option value="staff">Staff</option>
+          <option value="employee">Staff</option>
           <option value="manager">Manager</option>
           <option value="admin">Admin</option>
         </select>
@@ -500,7 +500,7 @@ export default function EmployeesPage() {
                       required
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
                     >
-                      <option value="staff">Staff</option>
+                      <option value="employee">Staff</option>
                       <option value="manager">Manager</option>
                       <option value="admin">Admin</option>
                     </select>

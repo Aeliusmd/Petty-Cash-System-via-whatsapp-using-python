@@ -52,7 +52,11 @@ function formatCurrency(amount: number | null): string {
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-LK', {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '-';
+
+  return date.toLocaleDateString('en-LK', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -117,7 +121,10 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   async function fetchReceipts() {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/claims/${claim.id}/receipts`);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/claims/${claim.id}/receipts`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setReceipts(data.receipts || []);
@@ -130,10 +137,23 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   }
 
   function getFileUrl(receipt: Receipt): string {
-    // Use file_path which contains the stored filename (e.g., receipt_20260123_abc123_0.jpg)
-    // file_name contains the original upload name, but file_path is what's actually stored
+    // Determine if file is in nested folder or flat
+    // Web uploads are in receipts/<claim_id>/filename
+    // WhatsApp uploads are in receipts/filename
+    
+    // Extract filename
     const filename = receipt.file_path.split('/').pop() || receipt.file_path;
-    return `${API_BASE_URL}/api/receipts/${filename}`;
+    
+    // Check if path contains claim_id directory
+    // Backend path for web: .../receipts/101/abc.jpg
+    // Backend path for whatsapp: .../receipts/abc.jpg
+    const isNested = receipt.file_path.includes(`/${receipt.claim_id}/`) || receipt.file_path.includes(`\\${receipt.claim_id}\\`);
+    
+    if (isNested) {
+        return `${API_BASE_URL}/api/receipts/${receipt.claim_id}/${filename}`;
+    } else {
+        return `${API_BASE_URL}/api/receipts/${filename}`;
+    }
   }
 
   function isImageFile(receipt: Receipt): boolean {

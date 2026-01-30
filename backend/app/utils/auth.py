@@ -43,6 +43,22 @@ async def require_super_admin(authorization: str = Header(None)) -> dict:
     return payload
 
 
+async def require_manager(authorization: str = Header(None)) -> dict:
+    """
+    Middleware to require manager, admin or super admin role
+    """
+    payload = await get_current_user(authorization)
+    
+    role = payload.get("role", "employee")
+    if role not in ["manager", "admin", "super_admin"]:
+        raise HTTPException(
+            status_code=403, 
+            detail="Access denied: Manager privileges required"
+        )
+    
+    return payload
+
+
 async def require_admin(authorization: str = Header(None)) -> dict:
     """
     Middleware to require admin or super admin role

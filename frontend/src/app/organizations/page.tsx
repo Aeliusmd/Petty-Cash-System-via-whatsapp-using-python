@@ -22,6 +22,7 @@ export default function OrganizationsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Organization | null>(null);
   const [formData, setFormData] = useState({ code: '', name: '' });
+  const [enteringUnitId, setEnteringUnitId] = useState<number | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -40,10 +41,34 @@ export default function OrganizationsPage() {
   const fetchUnits = async () => {
     try {
       const authToken = localStorage.getItem('auth_token');
+      console.log('🔑 Fetching organizations with token:', authToken ? authToken.substring(0, 10) + '...' : 'null');
+      
       const res = await fetch('http://localhost:4101/api/organizations', {
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
-      const data = await res.json();
+      
+      console.log(`📡 API Status: ${res.status} ${res.statusText}`);
+      
+      const text = await res.text();
+      console.log('📦 Raw API Response:', text);
+      
+      if (!res.ok) {
+        console.error('❌ API Error:', res.status, text);
+        if (res.status === 401) {
+            console.error('Unauthorized - Token might be invalid');
+        }
+        setUnits([]);
+        return;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error('❌ Failed to parse JSON:', e);
+        setUnits([]);
+        return;
+      }
       
       // Ensure we always set an array
       if (Array.isArray(data)) {
@@ -108,6 +133,18 @@ export default function OrganizationsPage() {
     }
   };
 
+  const handleEnter = async (orgId: number) => {
+    try {
+      setEnteringUnitId(orgId);
+      await enterOrganization(orgId);
+    } catch (error) {
+      console.error('Failed to enter organization:', error);
+      alert('Failed to enter organization. Please checking logs.');
+    } finally {
+      setEnteringUnitId(null);
+    }
+  };
+
   return (
     <div className="container mx-auto p-6">
       {accessDenied ? (
@@ -151,12 +188,17 @@ export default function OrganizationsPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap space-x-2">
-                    <button
-                      onClick={() => enterOrganization(unit.id)}
-                      className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm font-medium"
-                    >
-                      Enter →
-                    </button>
+                      <button
+                        onClick={() => handleEnter(unit.id)}
+                        disabled={enteringUnitId === unit.id}
+                        className={`px-3 py-1 text-white rounded text-sm font-medium ${
+                          enteringUnitId === unit.id 
+                            ? 'bg-indigo-400 cursor-not-allowed' 
+                            : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
+                      >
+                        {enteringUnitId === unit.id ? 'Entering...' : 'Enter →'}
+                      </button>
                     <button
                       onClick={() => {
                         setEditingUnit(unit);

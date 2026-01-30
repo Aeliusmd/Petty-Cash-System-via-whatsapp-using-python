@@ -8,10 +8,12 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
-# Get JWT secret from environment or use default (change in production!)
-JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-this-in-production')
-JWT_ALGORITHM = 'HS256'
-JWT_EXPIRATION_DAYS = 7
+from app.config import config
+
+# Get JWT secret from config
+JWT_SECRET = config.JWT_SECRET
+JWT_ALGORITHM = config.JWT_ALGORITHM
+JWT_EXPIRY_HOURS = config.JWT_EXPIRY_HOURS
 
 
 def create_access_token(
@@ -56,7 +58,7 @@ def create_access_token(
         'is_manager': is_manager or final_role in ('manager', 'admin', 'super_admin'),
         'organization_id': organization_id,
         'organization_name': organization_name,
-        'exp': datetime.utcnow() + timedelta(days=JWT_EXPIRATION_DAYS),
+        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS),
         'iat': datetime.utcnow()
     }
     

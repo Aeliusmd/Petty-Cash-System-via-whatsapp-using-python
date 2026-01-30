@@ -4,6 +4,7 @@ Sends WhatsApp notifications to staff for claim status updates
 """
 
 from typing import Optional
+from pathlib import Path
 from app import waha_client
 from app.models import employee as employee_model
 from app.models import claim as claim_model
@@ -326,8 +327,12 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
                 vendor = receipt.get('vendor') or 'Unknown'
                 
                 # Get link
-                filename = receipt.get('file_path')
-                receipt_link = f"{base_url}/api/receipts/{filename}" if filename else "N/A"
+                file_path = receipt.get('file_path')
+                if file_path:
+                    filename = Path(file_path).name
+                    receipt_link = f"{base_url}/api/receipts/{claim['id']}/{filename}"
+                else:
+                    receipt_link = "N/A"
                 
                 receipt_section += f"\n  {i}. Rs. {receipt_amount:,.0f} - {vendor}"
                 receipt_section += f"\n     🔗 {receipt_link}"
@@ -338,9 +343,14 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
                 receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
                 
                 # Validation: Check if receipts match claim amount
+                # Validation: Check if receipts match claim amount
                 if amount > 0:
-                    diff = abs(total_from_receipts - amount)
-                    diff_pct = (diff / amount) * 100
+                    # Convert both to float to ensure compatibility (Decimal vs Float issues)
+                    amount_float = float(amount)
+                    total_float = float(total_from_receipts)
+                    
+                    diff = abs(total_float - amount_float)
+                    diff_pct = (diff / amount_float) * 100
                     
                     if diff_pct > 5:  # Alert if difference is > 5%
                         receipt_section += f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
@@ -367,15 +377,32 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         await waha_client.send_text(manager_chat_id, message)
         print(f"✅ Sent new claim notification to manager {manager['name']}")
         
-        # Only forward WhatsApp messages if they exist (forwarding is supported by NOWEB)
+        # Forward receipts - handle both WhatsApp forwards and Web uploads
         if receipts_from_db:
              for i, receipt in enumerate(receipts_from_db, 1):
-                if receipt.get('message_id'):
-                    try:
+                try:
+                    # Case 1: WhatsApp Message (Forwarding)
+                    if receipt.get('message_id'):
                         print(f"🔄 Forwarding receipt #{i} message to manager")
                         await waha_client.forward_message(manager_chat_id, receipt['message_id'])
-                    except Exception as e:
-                        print(f"⚠️ Could not forward message for receipt #{i}: {e}")
+                    
+                    # Case 2: Web Upload (Send File)
+                    elif receipt.get('file_path') and os.path.exists(receipt.get('file_path')):
+                        print(f"📤 Sending local receipt file #{i} to manager")
+                        file_path = receipt['file_path']
+                        filename = receipt.get('file_name', f"receipt_{i}.jpg")
+                        
+                        # Determine if image or document
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                            await waha_client.send_image(manager_chat_id, file_path, caption=f"Receipt #{i} - {receipt.get('vendor', 'Unknown')}")
+                        else:
+                            await waha_client.send_file(manager_chat_id, file_path, caption=f"Receipt #{i} - {receipt.get('vendor', 'Unknown')}")
+                    else:
+                        print(f"⚠️ Receipt #{i} has no message_id and file not found locally")
+                        
+                except Exception as e:
+                    print(f"⚠️ Could not send receipt #{i}: {e}")
         
         return True
         

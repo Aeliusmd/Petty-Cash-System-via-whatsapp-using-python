@@ -79,7 +79,7 @@ async def find_location_in_text(text: str) -> Optional[dict]:
 def extract_days(text: str) -> int:
     """Extract days from text (e.g., "2 days", "3days", "5 day")"""
     match = re.search(r'(\d+)\s*days?', text, re.IGNORECASE)
-    return int(match.group(1)) if match else 1
+    return int(match.group(1)) if match else 0
 
 
 def extract_amount(text: str) -> Optional[float]:
@@ -164,7 +164,16 @@ def match_category_from_input(text: str, categories: list) -> dict | None:
     return None
 
 
-async def generate_reply(message_text: str, chat_id: str, media_info: dict = None) -> Optional[str]:
+
+async def process_message(chat_id: str, message: str, employee_id: int = None, media_info: dict = None) -> Optional[str]:
+    """
+    Wrapper for generate_reply to match webhooks call signature.
+    Acts as the public entry point for the reply engine.
+    """
+    return await generate_reply(message_text=message, chat_id=chat_id, media_info=media_info, employee_id=employee_id)
+
+
+async def generate_reply(message_text: str, chat_id: str, media_info: dict = None, employee_id: int = None) -> Optional[str]:
     """
     Main reply generation function
     
@@ -183,33 +192,45 @@ async def generate_reply(message_text: str, chat_id: str, media_info: dict = Non
         print(f'⏭️ Skipping group chat: {chat_id}')
         return None
 
-    # 2. Extract phone number from chat ID
+    # 2. Identify Employee
+    employee = None
     phone_number = None
-    
-    # Check for LID format (unsaved contact in WhatsApp)
-    if is_lid_format(chat_id):
-        print(f'🔍 LID format detected ({chat_id[:30]}...), attempting to resolve to phone via WAHA API...')
-        lid_info = await waha_client.get_lid_info(chat_id)
-        if lid_info and lid_info.get('pn'):
-            phone_number = str(lid_info.get('pn'))
-            print(f"✅ Resolved LID {chat_id[:15]}... to phone: {phone_number}")
-        else:
-            print(f"⚠️ Failed to resolve LID {chat_id[:30]}...")
-    else:
-        # Standard format
-        phone_number = extract_phone_from_chat_id(chat_id)
-    
-    # 3. If can't extract phone, silently ignore (no error message)
-    if not phone_number:
-        print(f'⏭️ Could not extract valid phone from chatId: {chat_id[:50]}... - silently ignoring')
-        return None
 
-    # 4. Check if this phone number is registered in the database
-    employee = await employee_model.find_by_phone(phone_number)
-    
-    # Also try to find by chat ID if phone lookup fails
+    # If employee_id provided (trusted from webhook), fetch directly
+    if employee_id:
+        employee = await employee_model.find_by_id(employee_id)
+        if employee:
+             # Just ensures we have phone number for logic consistency if needed
+             phone_number = employee.get('phone_number')
+
+    # If not found via ID, try to extract from Chat ID
     if not employee:
-        employee = await employee_model.find_by_chat_id(chat_id)
+        # Extract phone number from chat ID
+        
+        # Check for LID format (unsaved contact in WhatsApp)
+        if is_lid_format(chat_id):
+            print(f'🔍 LID format detected ({chat_id[:30]}...), attempting to resolve to phone via WAHA API...')
+            lid_info = await waha_client.get_lid_info(chat_id)
+            if lid_info and lid_info.get('pn'):
+                phone_number = str(lid_info.get('pn'))
+                print(f"✅ Resolved LID {chat_id[:15]}... to phone: {phone_number}")
+            else:
+                print(f"⚠️ Failed to resolve LID {chat_id[:30]}...")
+        else:
+            # Standard format
+            phone_number = extract_phone_from_chat_id(chat_id)
+        
+        # 3. If can't extract phone, silently ignore (no error message)
+        if not phone_number:
+            print(f'⏭️ Could not extract valid phone from chatId: {chat_id[:50]}... - silently ignoring')
+            return None
+
+        # 4. Check if this phone number is registered in the database
+        employee = await employee_model.find_by_phone(phone_number)
+        
+        # Also try to find by chat ID if phone lookup fails
+        if not employee:
+            employee = await employee_model.find_by_chat_id(chat_id)
 
     # 5. If not registered, silently ignore (no response)
     if not employee:
@@ -1005,6 +1026,7 @@ Or type:
             
             if '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
                 print(f"🔍 DEBUG receipt_upload: Parsing receipt data from message_text")
+                print(f"📝 DEBUG: Full message_text = {repr(message_text)}")
                 
                 # Extract vendor
                 if 'Vendor:' in message_text:
@@ -1012,14 +1034,18 @@ Or type:
                     extracted_vendor = vendor_part.split('\n')[0].strip()
                     print(f"🏪 Extracted vendor: {extracted_vendor}")
                 
-                # Extract amount
-                if 'Detected amount: Rs.' in message_text:
-                    amount_str = message_text.split('Detected amount: Rs.', 1)[1].split('\n')[0].strip()
-                    try:
-                        extracted_amount = float(amount_str.replace(',', ''))
-                        print(f"💰 Extracted amount: Rs.{extracted_amount}")
-                    except Exception as e:
-                        print(f"❌ Error parsing amount: {e}")
+                # Extract amount - handle both "Rs. 1000" and "Rs.1000" formats
+                if 'Detected amount:' in message_text:
+                    amount_part = message_text.split('Detected amount:', 1)[1]
+                    # Extract everything after "Rs" or "Rs." until newline or end
+                    amount_match = re.search(r'Rs\.?\s*([\d,\.]+)', amount_part)
+                    if amount_match:
+                        amount_str = amount_match.group(1)
+                        try:
+                            extracted_amount = float(amount_str.replace(',', ''))
+                            print(f"💰 Extracted amount: Rs.{extracted_amount}")
+                        except Exception as e:
+                            print(f"❌ Error parsing amount '{amount_str}': {e}")
                 
                 # Extract date
                 if 'Date:' in message_text:

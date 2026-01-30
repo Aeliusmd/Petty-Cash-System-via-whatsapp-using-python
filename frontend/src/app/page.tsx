@@ -105,6 +105,12 @@ export default function DashboardPage() {
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
         <div className="relative z-10">
           <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.name}! 👋</h1>
+          {user?.organization_name && (
+            <div className="text-2xl font-semibold text-white mb-2 flex items-center gap-2">
+              <span className="opacity-80">Organization:</span>
+              <span>{user.organization_name}</span>
+            </div>
+          )}
           <p className="text-indigo-100 text-lg">Here's what's happening in your Petty Cash system.</p>
         </div>
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 skew-x-12 transform translate-x-12"></div>
@@ -171,7 +177,7 @@ export default function DashboardPage() {
                       <span className="block text-xs text-gray-400 font-normal">{claim.category_name}</span>
                     </td>
                     <td className="px-6 py-4">{claim.employee_name}</td>
-                    <td className="px-6 py-4">LKR {claim.final_amount.toLocaleString()}</td>
+                    <td className="px-6 py-4">LKR {(claim.final_amount || 0).toLocaleString()}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         claim.status_code === 'APPROVED' ? 'bg-green-100 text-green-800' :
@@ -199,13 +205,13 @@ export default function DashboardPage() {
               <div key={cat.category}>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="font-medium text-gray-700">{cat.category}</span>
-                  <span className="text-gray-500">LKR {cat.total_amount.toLocaleString()}</span>
+                  <span className="text-gray-500">LKR {(cat.total_amount || 0).toLocaleString()}</span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2">
                   <div
                     className="bg-indigo-600 h-2 rounded-full"
                     style={{
-                      width: `${(cat.total_amount / Math.max(...stats.categories.map(c => c.total_amount))) * 100}%`
+                      width: `${((cat.total_amount || 0) / Math.max(...stats.categories.map(c => c.total_amount || 0), 1)) * 100}%`
                     }}
                   ></div>
                 </div>

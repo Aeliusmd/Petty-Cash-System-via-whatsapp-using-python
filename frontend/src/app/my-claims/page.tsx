@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import NewClaimModal from '@/components/NewClaimModal';
+import ClaimDetailsModal from '@/components/ClaimDetailsModal';
 
 interface Claim {
   id: number;
@@ -28,6 +29,7 @@ interface Claim {
   created_at: string;
 }
 
+// Helper functions (defined once)
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 function formatCurrency(amount: number | null): string {
@@ -75,6 +77,7 @@ function MyClaimsContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
   const [showNewClaimModal, setShowNewClaimModal] = useState(false);
+  const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -206,15 +209,16 @@ function MyClaimsContent() {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Amount</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Status</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Date</th>
+                  <th className="px-6 py-4 text-right text-xs font-medium text-gray-900 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {claims.map((claim) => (
                   <tr key={claim.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <Link href={`/claims/${claim.id}`} className="font-medium text-indigo-600 hover:text-indigo-800">
+                      <span className="font-medium text-indigo-600">
                         {claim.claim_number}
-                      </Link>
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -238,6 +242,14 @@ function MyClaimsContent() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
                       {formatDate(claim.created_at)}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={() => setSelectedClaim(claim)}
+                        className="text-indigo-600 hover:text-indigo-900 font-medium text-sm"
+                      >
+                        View Details
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -271,6 +283,15 @@ function MyClaimsContent() {
                 </button>
               </div>
             </div>
+          )}
+
+          {/* Claim Details Modal */}
+          {selectedClaim && (
+            <ClaimDetailsModal
+              claim={selectedClaim}
+              isOpen={!!selectedClaim}
+              onClose={() => setSelectedClaim(null)}
+            />
           )}
         </div>
       )}

@@ -13,7 +13,6 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 # Load environment
@@ -27,8 +26,6 @@ from app.controllers.claim_controller import router as claim_router
 from app.controllers.category_controller import router as category_router
 from app.controllers.organization_controller import router as organization_router
 from app.controllers.audit_controller import router as audit_router
-from app.controllers.dashboard_controller import router as dashboard_router
-from app.controllers.configuration_controller import router as config_router
 
 # Import webhook handler (will be moved to controller in next phase)
 from app.webhooks import webhook_router
@@ -111,44 +108,8 @@ app.include_router(organization_router)
 # Audit Logs
 app.include_router(audit_router)
 
-# Dashboard Stats
-app.include_router(dashboard_router)
-
-# Configuration (Units, Grades, Locations)
-app.include_router(config_router)
-
 # Webhooks (WhatsApp events)
 app.include_router(webhook_router)
-
-
-# ============================================================
-# STATIC FILES (Receipts)
-# ============================================================
-
-# Ensure receipts directory exists
-# Helper to get backend root directory (parent of app)
-# Try explicit path first (Docker container standard)
-possible_paths = [
-    Path("/app/backend/receipts"),
-    Path(__file__).resolve().parent.parent / "receipts",
-    Path("receipts").resolve()
-]
-
-receipts_dir = None
-for path in possible_paths:
-    print(f"🔍 DEBUG: Checking receipts path: {path}")
-    if path.exists():
-        receipts_dir = path
-        print(f"✅ DEBUG: Found receipts dir at {path} with {len(list(path.glob('*')))} files")
-        break
-
-if not receipts_dir:
-    # Fallback to creating one relative to file
-    receipts_dir = possible_paths[1]
-    print(f"⚠️ DEBUG: No receipts dir found! Creating at {receipts_dir}")
-    receipts_dir.mkdir(parents=True, exist_ok=True)
-
-app.mount("/api/receipts", StaticFiles(directory=str(receipts_dir)), name="receipts")
 
 
 # ============================================================

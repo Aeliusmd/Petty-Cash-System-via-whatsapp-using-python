@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.controllers.base import BaseController
 from app.services.auth_service import AuthService
 from app.models.employee import Employee
-from app.schemas.auth import RequestOTPRequest, VerifyOTPRequest, LoginResponse
+from app.schemas.auth import RequestOTPRequest, VerifyOTPRequest, LoginResponse, RefreshTokenRequest
 from app.utils.auth import require_authenticated
 from app import waha_client
 
@@ -26,6 +26,7 @@ class AuthController(BaseController):
         """Register authentication routes"""
         self.router.post("/request-otp")(self.request_otp)
         self.router.post("/verify-otp", response_model=LoginResponse)(self.verify_otp)
+        self.router.post("/refresh", response_model=LoginResponse)(self.refresh_token)
         self.router.post("/logout")(self.logout)
         self.router.get("/me")(self.get_current_user)
     
@@ -58,13 +59,23 @@ class AuthController(BaseController):
         return self.success_response(message="OTP sent successfully")
     
     async def verify_otp(self, data: VerifyOTPRequest, request: Request):
-        """Verify OTP and return JWT token"""
+        """Verify OTP and return JWT token pair"""
         service = AuthService(request)
         
         result = await service.verify_otp(data.phone_number, data.otp_code)
         if not result:
             raise HTTPException(status_code=401, detail="Invalid or expired OTP")
         
+        return result
+
+    async def refresh_token(self, data: RefreshTokenRequest, request: Request):
+        """Refresh access token using refresh token"""
+        service = AuthService(request)
+        
+        result = await service.refresh_access_token(data.refresh_token)
+        if not result:
+            raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+            
         return result
     
     async def logout(self, request: Request, auth: dict = Depends(require_authenticated)):
@@ -78,6 +89,11 @@ class AuthController(BaseController):
         employee = await Employee.find_by_id(auth['employee_id'])
         if not employee:
             raise HTTPException(status_code=404, detail="User not found")
+        
+        # Load permissions so they appear in the UI
+        perms = await employee.get_permissions()
+        employee.permissions = perms
+        
         return employee.to_dict()
 
 

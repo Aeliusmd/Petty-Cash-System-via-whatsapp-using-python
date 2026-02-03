@@ -23,7 +23,8 @@ class Employee(BaseModel):
     name: str = None
     phone_number: str = None
     email: str = None
-    role: str = "staff"
+    role: str = "staff" # Legacy string role (kept for backward compatibility)
+    role_id: int = None # New RBAC role ID
     grade_id: int = None
     unit_id: int = None
     location_id: int = None
@@ -42,10 +43,51 @@ class Employee(BaseModel):
     location_name: str = None
     manager_name: str = None
     manager_phone: str = None
+    organization_id: int = None
+    organization_name: str = None
+    
+    # Permissions (populated dynamically)
+    permissions: List[str] = []
+    
+    async def get_permissions(self) -> List[str]:
+        """
+        Get all permissions including inherited ones via Recursive CTE
+        """
+        # If no role_id, fallback to mapping from role string or empty
+        role_id_to_use = self.role_id
+        if not role_id_to_use and self.role:
+            # Try to resolve role_id from role string
+            res = await db.query("SELECT id FROM roles WHERE code = $1", self.role)
+            if res:
+                role_id_to_use = res[0]['id']
+                
+        if not role_id_to_use:
+            return []
+
+        query = """
+            WITH RECURSIVE role_hierarchy AS (
+                -- Base case: current role
+                SELECT id, parent_role_id FROM roles WHERE id = $1
+                UNION ALL
+                -- Recursive case: parent role
+                SELECT p.id, p.parent_role_id 
+                FROM roles p 
+                JOIN role_hierarchy rh ON rh.parent_role_id = p.id
+            )
+            SELECT DISTINCT p.code
+            FROM role_hierarchy rh
+            JOIN role_permissions rp ON rh.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE p.is_active = TRUE
+        """
+        rows = await db.query(query, role_id_to_use)
+        return [row['code'] for row in rows]
     
     def __init__(self, data: Dict[str, Any] = None):
         """Initialize employee from data dict"""
         super().__init__(data)
+        if data and 'permissions' in data:
+            self.permissions = data['permissions']
     
     @staticmethod
     def normalize_phone(phone: str) -> str:
@@ -241,9 +283,11 @@ class Employee(BaseModel):
         
         result = await db.query("""
             INSERT INTO employees (employee_code, name, phone_number, email,
-                                   grade_id, unit_id, location_id, manager_id, role,
+                                   grade_id, unit_id, location_id, manager_id, role, role_id,
                                    is_admin, is_manager)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 
+                    (SELECT id FROM roles WHERE code = $9 LIMIT 1), -- Auto-map role string to ID
+                    $10, $11) RETURNING *
         """, employee_code, data.get('name'), data.get('phone_number'),
             data.get('email'), data.get('grade_id'), data.get('unit_id'),
             data.get('location_id'), data.get('manager_id'), data.get('role', 'staff'),
@@ -260,7 +304,7 @@ class Employee(BaseModel):
         valid_fields = {
             'employee_code', 'name', 'phone_number', 'email',
             'grade_id', 'unit_id', 'location_id', 'manager_id',
-            'role', 'is_active', 'is_admin', 'is_manager'
+            'role', 'role_id', 'is_active', 'is_admin', 'is_manager'
         }
         
         set_clauses = ["updated_at = CURRENT_TIMESTAMP"]
@@ -324,6 +368,8 @@ class Employee(BaseModel):
             'phone_number': self.phone_number,
             'email': self.email,
             'role': self.role,
+            'role_id': self.role_id,
+            'permissions': self.permissions,
             'grade_id': self.grade_id,
             'grade_code': self.grade_code,
             'grade_name': self.grade_name,
@@ -336,6 +382,8 @@ class Employee(BaseModel):
             'manager_id': self.manager_id,
             'manager_name': self.manager_name,
             'manager_phone': self.manager_phone,
+            'organization_id': self.organization_id,  # Was missing!
+            'organization_name': self.organization_name, # Was missing!
             'whatsapp_chat_id': self.whatsapp_chat_id,
             'is_active': self.is_active,
             'is_admin': self.is_admin,

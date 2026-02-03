@@ -13,7 +13,7 @@ from app.schemas.organization import (
     OrganizationCreate, OrganizationUpdate, OrganizationResponse,
     UnitCreate, UnitUpdate, EnterOrganizationResponse
 )
-from app.utils.auth import require_super_admin, require_authenticated
+from app.utils.auth import require_permission, require_authenticated
 
 
 class OrganizationController(BaseController):
@@ -39,7 +39,7 @@ class OrganizationController(BaseController):
     async def get_organizations(
         self,
         include_inactive: bool = False,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Get all organizations (super admin only)"""
         print(f"🏢 Accessing get_organizations (inactive={include_inactive})")
@@ -50,7 +50,7 @@ class OrganizationController(BaseController):
     async def get_organization(
         self,
         org_id: int,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Get single organization by ID"""
         org = await Organization.find_by_id(org_id)
@@ -61,7 +61,7 @@ class OrganizationController(BaseController):
     async def get_organization_units(
         self,
         org_id: int,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Get units for an organization"""
         units = await Organization.get_units(org_id)
@@ -70,7 +70,7 @@ class OrganizationController(BaseController):
     async def create_organization(
         self,
         data: OrganizationCreate,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Create new organization"""
         try:
@@ -85,7 +85,7 @@ class OrganizationController(BaseController):
         self,
         org_id: int,
         data: OrganizationUpdate,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Update existing organization"""
         org = await Organization.update(org_id, data.model_dump(exclude_none=True))
@@ -96,7 +96,7 @@ class OrganizationController(BaseController):
     async def delete_organization(
         self,
         org_id: int,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Delete organization (soft delete)"""
         success = await Organization.delete(org_id)
@@ -108,7 +108,7 @@ class OrganizationController(BaseController):
         self,
         org_id: int,
         request: Request,
-        auth: dict = Depends(require_super_admin)
+        auth: dict = Depends(require_permission("orgs.manage"))
     ):
         """Enter organization context"""
         print(f"🏢 Entering organization request: org_id={org_id}, employee_id={auth.get('employee_id')}")
@@ -119,18 +119,22 @@ class OrganizationController(BaseController):
                 raise HTTPException(status_code=404, detail="Organization not found")
             
             auth_service = AuthService(request)
-            token = await auth_service.enter_organization(
+            tokens = await auth_service.enter_organization(
                 employee_id=auth['employee_id'],
                 organization_id=org.id,
                 organization_name=org.name
             )
             
-            if not token:
+            if not tokens:
                 print("❌ Failed to generate token for organization entry")
                 raise HTTPException(status_code=500, detail="Failed to generate authentication token")
             
             from app.models.employee import Employee
             employee = await Employee.find_by_id(auth['employee_id'])
+            
+            # Populate permissions before conversion
+            if employee:
+                employee.permissions = await employee.get_permissions()
             
             # Inject organization context into employee object for frontend
             employee_dict = employee.to_dict() if employee else {}
@@ -139,7 +143,8 @@ class OrganizationController(BaseController):
             
             print(f"✅ Successfully entered organization: {org.name}")
             return {
-                "access_token": token,
+                "access_token": tokens['access_token'],
+                "refresh_token": tokens['refresh_token'],
                 "token_type": "bearer",
                 "organization": org.to_dict(),
                 "employee": employee_dict
@@ -160,7 +165,7 @@ class OrganizationController(BaseController):
             raise HTTPException(status_code=400, detail="Not in an organization context")
         
         auth_service = AuthService(request)
-        token = await auth_service.exit_organization(
+        tokens = await auth_service.exit_organization(
             employee_id=auth['employee_id'],
             organization_id=auth['organization_id']
         )
@@ -168,8 +173,13 @@ class OrganizationController(BaseController):
         from app.models.employee import Employee
         employee = await Employee.find_by_id(auth['employee_id'])
         
+        # Populate permissions
+        if employee:
+            employee.permissions = await employee.get_permissions()
+        
         return {
-            "access_token": token,
+            "access_token": tokens['access_token'],
+            "refresh_token": tokens['refresh_token'],
             "token_type": "bearer",
             "employee": employee.to_dict() if employee else {}
         }

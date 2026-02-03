@@ -17,10 +17,18 @@ const geistMono = Geist_Mono({
 });
 
 function LayoutContent({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isAdmin, isManager, isSuperAdmin, isInOrganization, user, logout, exitOrganization } = useAuth();
+  const { isAuthenticated, isAdmin, isManager, isSuperAdmin, isInOrganization, user, logout, exitOrganization, hasPermission, hasAnyPermission } = useAuth();
 
   // Super admin without org context - show only organizations
   const showOnlyOrganizations = isSuperAdmin && !isInOrganization;
+
+  // Permission-based navigation visibility
+  const canViewDashboard = hasAnyPermission(['dashboard.view.org', 'dashboard.view.team']);
+  const canViewAllClaims = hasAnyPermission(['claims.read.all', 'claims.read.team', 'claims.approve']);
+  const canViewEmployees = hasPermission('employees.read.all');
+  const canViewSettings = hasAnyPermission(['config.view', 'config.manage']);
+  const canViewAuditLogs = hasPermission('audit.view');
+  const canManageRoles = hasPermission('roles.read');
 
   return (
     <div className="min-h-screen">
@@ -57,37 +65,48 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
                       </div>
                     )}
 
-                    {/* Dashboard - All roles */}
-                    <Link href="/" className="hover:text-indigo-200 transition-colors font-medium">
-                      Dashboard
-                    </Link>
+                    {/* Dashboard - Permission-based */}
+                    {canViewDashboard && (
+                      <Link href="/" className="hover:text-indigo-200 transition-colors font-medium">
+                        Dashboard
+                      </Link>
+                    )}
                     
-                    {/* Claims - All roles but different access */}
-                    <Link 
-                      href={isAdmin || isManager ? "/claims" : "/my-claims"} 
-                      className="hover:text-indigo-200 transition-colors font-medium"
-                    >
-                      {isAdmin || isManager ? 'All Claims' : 'My Claims'}
-                    </Link>
+                    {/* Claims - Only show if user has any claims permission */}
+                    {hasAnyPermission(['claims.read.own', 'claims.read.team', 'claims.read.all', 'claims.create']) && (
+                      <Link 
+                        href={canViewAllClaims ? "/claims" : "/my-claims"} 
+                        className="hover:text-indigo-200 transition-colors font-medium"
+                      >
+                        {canViewAllClaims ? 'All Claims' : 'My Claims'}
+                      </Link>
+                    )}
                     
-                    {/* Employees - Admin only */}
-                    {isAdmin && (
+                    {/* Employees - Permission-based */}
+                    {canViewEmployees && (
                       <Link href="/employees" className="hover:text-indigo-200 transition-colors font-medium">
                         Employees
                       </Link>
                     )}
                     
-                    {/* Settings - Admin only */}
-                    {isAdmin && (
+                    {/* Settings - Permission-based */}
+                    {canViewSettings && (
                       <Link href="/settings" className="hover:text-indigo-200 transition-colors font-medium">
                         ⚙️ Settings
                       </Link>
                     )}
                     
-                    {/* Audit Logs - Admin only */}
-                    {isAdmin && (
+                    {/* Audit Logs - Permission-based */}
+                    {canViewAuditLogs && (
                       <Link href="/audit-logs" className="hover:text-indigo-200 transition-colors font-medium">
                         📋 Audit Logs
+                      </Link>
+                    )}
+                    
+                    {/* Roles Management - Permission-based */}
+                    {canManageRoles && (
+                      <Link href="/roles" className="hover:text-indigo-200 transition-colors font-medium">
+                        🎭 Roles
                       </Link>
                     )}
                   </>
@@ -110,6 +129,7 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
           </div>
         </header>
       )}
+
 
       {/* Main Content */}
       <main className={isAuthenticated ? "max-w-7xl mx-auto px-4 py-8" : ""}>

@@ -268,13 +268,21 @@ class Claim(BaseModel):
         return result[0] if result else {}
     
     @classmethod
-    async def get_dashboard_stats(cls, organization_id: int = None) -> Dict[str, Any]:
-        """Get global dashboard statistics, optionally filtered by organization"""
+    async def get_dashboard_stats(cls, organization_id: int = None, manager_id: int = None) -> Dict[str, Any]:
+        """Get dashboard statistics, filtered by organization or manager"""
         where_clause = "WHERE 1=1"
         args = []
+        param_idx = 1
+        
         if organization_id:
-            where_clause += " AND e.organization_id = $1"
+            where_clause += f" AND e.organization_id = ${param_idx}"
             args.append(organization_id)
+            param_idx += 1
+            
+        if manager_id:
+            where_clause += f" AND e.manager_id = ${param_idx}"
+            args.append(manager_id)
+            param_idx += 1
         
         result = await db.query(f"""
             SELECT COUNT(*) as total_claims,
@@ -292,13 +300,21 @@ class Claim(BaseModel):
         return result[0] if result else {}
 
     @classmethod
-    async def get_category_stats(cls, organization_id: int = None) -> List[Dict[str, Any]]:
+    async def get_category_stats(cls, organization_id: int = None, manager_id: int = None) -> List[Dict[str, Any]]:
         """Get spending by category"""
         where_clause = "WHERE s.code = 'APPROVED'"
         args = []
+        param_idx = 1
+        
         if organization_id:
-            where_clause += " AND e.organization_id = $1"
+            where_clause += f" AND e.organization_id = ${param_idx}"
             args.append(organization_id)
+            param_idx += 1
+            
+        if manager_id:
+            where_clause += f" AND e.manager_id = ${param_idx}"
+            args.append(manager_id)
+            param_idx += 1
             
         result = await db.query(f"""
             SELECT cat.id as category, cat.name, COUNT(*) as count, SUM(c.final_amount) as total_amount
@@ -314,13 +330,21 @@ class Claim(BaseModel):
         return result
 
     @classmethod
-    async def get_recent_claims(cls, limit: int = 5, organization_id: int = None) -> List[Dict[str, Any]]:
+    async def get_recent_claims(cls, limit: int = 5, organization_id: int = None, manager_id: int = None) -> List[Dict[str, Any]]:
         """Get recent claims for dashboard"""
         where_clause = "WHERE 1=1"
         args = [limit]
+        param_idx = 2
+        
         if organization_id:
-            where_clause += " AND e.organization_id = $2"
+            where_clause += f" AND e.organization_id = ${param_idx}"
             args.append(organization_id)
+            param_idx += 1
+            
+        if manager_id:
+            where_clause += f" AND e.manager_id = ${param_idx}"
+            args.append(manager_id)
+            param_idx += 1
             
         result = await db.query(f"""
             SELECT c.claim_number, c.created_at, e.name as employee_name,

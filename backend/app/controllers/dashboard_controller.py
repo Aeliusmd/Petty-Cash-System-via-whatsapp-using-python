@@ -3,38 +3,44 @@ Dashboard Controller
 API routes for dashboard statistics
 """
 from fastapi import APIRouter, Request, Depends, HTTPException
-from app.utils.auth import require_manager
+from app.utils.auth import require_authenticated
 from app.models.claim import Claim
 
 router = APIRouter(prefix="/api/stats", tags=["Dashboard"])
 
 @router.get("/")
-async def get_dashboard_stats(request: Request, auth: dict = Depends(require_manager)):
+async def get_dashboard_stats(request: Request, auth: dict = Depends(require_authenticated)):
     """
     Get dashboard statistics
-    Requires Manager/Admin role
+    Requires dashboard.view.org or dashboard.view.team permission
     """
     if request.method == "OPTIONS":
         return {}
 
-    # For super_admin viewing global scope, ignore organization filter
-    # Super admin's own org membership should not filter the dashboard
-    role = auth.get("role", "employee")
+    permissions = auth.get("permissions", [])
     organization_id = auth.get("organization_id")
+    manager_id = None
     
-    # If super_admin and viewing global (indicated by not having entered a specific org context)
-    # For now, we allow super_admins to always see global stats unless we add explicit "entered org" flag
-    # A more robust solution would check if they explicitly "entered" an org
-    # For simplicity, super_admins always get global view on the main dashboard
-    if role == "super_admin":
-        # Super Admin sees all organizations unless they've explicitly entered one
-        # The "enter organization" action should set a flag or we rely on frontend to call a different endpoint
-        # For now, let's check if org name is set - if not, it's global view
-        if not auth.get("organization_name"):
-            organization_id = None
+    # Determine Scope based on permissions
+    # Prioritize Org View if user has both
+    if "dashboard.view.org" in permissions:
+        # Full Organization View (or Global if Super Admin with no org context)
+        # Verify if organization_id is None and user is NOT super_admin?
+        # Typically require_authenticated ensures valid context unless system role.
+        pass
+    elif "dashboard.view.team" in permissions:
+        # Team View - Limit to manager's team
+        manager_id = auth.get("employee_id")
+    else:
+        raise HTTPException(status_code=403, detail="Access denied to dashboard")
+        
+    # Super Admin Global View Handling (Legacy/System Role)
+    role = auth.get("role", "employee")
+    if role == "super_admin" and not auth.get("organization_name"):
+        organization_id = None
     
     # Overview stats
-    overview = await Claim.get_dashboard_stats(organization_id)
+    overview = await Claim.get_dashboard_stats(organization_id=organization_id, manager_id=manager_id)
     
     # Ensure default values for nulls
     overview = {
@@ -47,10 +53,10 @@ async def get_dashboard_stats(request: Request, auth: dict = Depends(require_man
     }
     
     # Categories
-    categories = await Claim.get_category_stats(organization_id)
+    categories = await Claim.get_category_stats(organization_id=organization_id, manager_id=manager_id)
     
     # Recent Claims
-    recent = await Claim.get_recent_claims(limit=5, organization_id=organization_id)
+    recent = await Claim.get_recent_claims(limit=5, organization_id=organization_id, manager_id=manager_id)
     
     return {
         "overview": overview,

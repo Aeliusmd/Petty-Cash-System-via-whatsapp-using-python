@@ -9,7 +9,7 @@ from app.models.unit import Unit
 from app.models.rates import Grade, Location
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryUpdate
-from app.utils.auth import require_authenticated, require_admin
+from app.utils.auth import require_authenticated, require_permission
 
 # Inline Schemas for Unit
 class UnitCreate(BaseModel):
@@ -65,7 +65,7 @@ async def get_units(
 @units_router.post("/")
 async def create_unit(
     data: UnitCreate,
-    auth: dict = Depends(require_admin)
+    auth: dict = Depends(require_permission("config.manage"))
 ):
     """Create a new unit (department)"""
     # Validation: Ensure creation within auth scope (unless super admin)
@@ -87,7 +87,7 @@ async def create_unit(
 async def update_unit(
     unit_id: int,
     data: UnitUpdate,
-    auth: dict = Depends(require_admin)
+    auth: dict = Depends(require_permission("config.manage"))
 ):
     """Update a unit"""
     unit = await Unit.find_by_id(unit_id)
@@ -100,7 +100,7 @@ async def update_unit(
 @units_router.delete("/{unit_id}")
 async def delete_unit(
     unit_id: int,
-    auth: dict = Depends(require_admin)
+    auth: dict = Depends(require_permission("config.manage"))
 ):
     """Delete a unit"""
     unit = await Unit.find_by_id(unit_id)
@@ -140,64 +140,9 @@ async def get_locations(auth: dict = Depends(require_authenticated)):
     locations = await Location.find_all()
     return {"locations": locations}
 
-# ---------------------------------------------------------
-# Categories Routes
-# ---------------------------------------------------------
-categories_router = APIRouter(prefix="/api/categories", tags=["Configuration"])
 
-@categories_router.get("/")
-async def get_categories(
-    unit_id: Optional[int] = None,
-    auth: dict = Depends(require_authenticated)
-):
-    """Get categories"""
-    if unit_id:
-        cats = await Category.find_by_unit(unit_id, include_inactive=True)
-    else:
-        # Global categories (unit_id IS NULL).
-        # Are these shared across orgs? 
-        # Category table doesn't have organization_id column?
-        # If not, they are truly global.
-        cats = await Category.find_all(include_inactive=True)
-        
-    result = [c.to_dict() for c in cats]
-    return {"categories": result} 
 
-@categories_router.post("/")
-async def create_category(
-    data: CategoryCreate,
-    auth: dict = Depends(require_admin)
-):
-    """Create a new category"""
-    cat = await Category.create(data.model_dump())
-    return cat.to_dict() if cat else {}
-
-@categories_router.put("/{category_id}")
-async def update_category(
-    category_id: int,
-    data: CategoryUpdate,
-    auth: dict = Depends(require_admin)
-):
-    """Update a category"""
-    cat = await Category.find_by_id(category_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="Category not found")
-        
-    updated = await cat.update(data.model_dump(exclude_unset=True))
-    return updated.to_dict() if updated else {}
-
-@categories_router.delete("/{category_id}")
-async def delete_category(
-    category_id: int,
-    auth: dict = Depends(require_admin)
-):
-    """Delete a category"""
-    cat = await Category.find_by_id(category_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="Category not found")
-        
-    await cat.delete()
-    return {"success": True}
+# Categories router implementation removed as it is handled by CategoryController
 
 # ---------------------------------------------------------
 # Register Sub-Routers
@@ -205,4 +150,4 @@ async def delete_category(
 router.include_router(units_router)
 router.include_router(grades_router)
 router.include_router(locations_router)
-router.include_router(categories_router)
+# Categories router removed (handled by CategoryController)

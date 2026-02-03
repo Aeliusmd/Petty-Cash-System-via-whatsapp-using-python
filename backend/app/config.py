@@ -25,7 +25,8 @@ class Config:
     # JWT
     JWT_SECRET: str = os.getenv('JWT_SECRET', 'your-secret-key')
     JWT_ALGORITHM: str = os.getenv('JWT_ALGORITHM', 'HS256')
-    JWT_EXPIRY_HOURS: int = int(os.getenv('JWT_EXPIRY_HOURS', '24'))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv('REFRESH_TOKEN_EXPIRE_DAYS', '7'))
     
     # WAHA (WhatsApp HTTP API)
     WAHA_BASE_URL: str = os.getenv('WAHA_BASE_URL', 'http://waha:3000')

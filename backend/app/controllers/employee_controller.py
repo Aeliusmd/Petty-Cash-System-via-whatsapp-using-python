@@ -10,8 +10,7 @@ from app.services.employee_service import EmployeeService
 from app.schemas.employee import (
     EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeListResponse
 )
-from app.utils.auth import require_admin, require_authenticated
-
+from app.utils.auth import require_permission, require_authenticated
 
 class EmployeeController(BaseController):
     """Controller for employee management endpoints"""
@@ -24,11 +23,17 @@ class EmployeeController(BaseController):
     
     def _register_routes(self):
         """Register employee routes"""
+        # List all: requires employees.read.all
         self.router.get("/")(self.get_employees)
+        # Get one: requires authenticated (checked inside)
         self.router.get("/{employee_id}")(self.get_employee)
+        # Create: requires employees.create
         self.router.post("/")(self.create_employee)
+        # Update: requires employees.update.all (for now, assuming admin update)
         self.router.put("/{employee_id}")(self.update_employee)
+        # Delete: requires employees.delete
         self.router.delete("/{employee_id}")(self.delete_employee)
+        # Activate: requires employees.activate
         self.router.post("/{employee_id}/activate")(self.activate_employee)
     
     async def get_employees(
@@ -37,7 +42,7 @@ class EmployeeController(BaseController):
         role: Optional[str] = None,
         location_id: Optional[int] = None,
         include_inactive: bool = False,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("employees.read.all"))
     ):
         """Get all employees with optional filters"""
         service = EmployeeService(request)
@@ -60,9 +65,16 @@ class EmployeeController(BaseController):
         """Get single employee by ID"""
         service = EmployeeService(request)
         
-        # Staff can only view their own profile
-        if not auth.get('is_admin') and auth['employee_id'] != employee_id:
-            raise HTTPException(status_code=403, detail="Access denied")
+        permissions = auth.get('permissions', [])
+        is_self = auth['employee_id'] == employee_id
+        
+        # Check permissions
+        if is_self:
+            if 'employees.read.own' not in permissions and 'employees.read.all' not in permissions:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+             if 'employees.read.all' not in permissions:
+                 raise HTTPException(status_code=403, detail="Access denied")
         
         employee = await service.get_employee(employee_id)
         if not employee:
@@ -74,7 +86,7 @@ class EmployeeController(BaseController):
         self,
         data: EmployeeCreate,
         request: Request,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("employees.create"))
     ):
         """Create new employee"""
         service = EmployeeService(request)
@@ -92,7 +104,7 @@ class EmployeeController(BaseController):
         employee_id: int,
         data: EmployeeUpdate,
         request: Request,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("employees.update.all"))
     ):
         """Update existing employee"""
         service = EmployeeService(request)
@@ -113,7 +125,7 @@ class EmployeeController(BaseController):
         self,
         employee_id: int,
         request: Request,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("employees.delete"))
     ):
         """Deactivate employee (soft delete)"""
         service = EmployeeService(request)
@@ -133,7 +145,7 @@ class EmployeeController(BaseController):
         self,
         employee_id: int,
         request: Request,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("employees.activate"))
     ):
         """Reactivate a deactivated employee"""
         service = EmployeeService(request)

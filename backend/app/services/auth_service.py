@@ -69,8 +69,9 @@ class AuthService(BaseService):
             )
             return None
         
-        # Generate JWT token
-        token = self.create_token(employee)
+        # Generate JWT tokens
+        access_token = await self.create_access_token(employee)
+        refresh_token = await self.create_refresh_token(employee.id)
         
         await self.audit_service.log_auth_action(
             action='LOGIN',
@@ -78,20 +79,29 @@ class AuthService(BaseService):
         )
         
         return {
-            'access_token': token,
+            'access_token': access_token,
+            'refresh_token': refresh_token,
             'token_type': 'bearer',
             'employee': employee.to_dict()
         }
     
-    def create_token(self, employee: Employee, organization_id: int = None, organization_name: str = None) -> str:
-        """Create JWT token for employee"""
+    async def create_access_token(self, employee: Employee, organization_id: int = None, organization_name: str = None) -> str:
+        """Create short-lived Access Token (60 mins)"""
+        
+        # Load permissions
+        permissions = await employee.get_permissions()
+        employee.permissions = permissions
+        
         payload = {
             'employee_id': employee.id,
             'name': employee.name,
             'role': employee.role,
+            'role_id': employee.role_id,
+            'permissions': permissions,
             'is_admin': employee.is_admin,
             'is_manager': employee.is_manager,
-            'exp': datetime.utcnow() + timedelta(hours=config.JWT_EXPIRY_HOURS)
+            'type': 'access',
+            'exp': datetime.utcnow() + timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
         }
         
         if organization_id:
@@ -105,6 +115,43 @@ class AuthService(BaseService):
             payload['organization_name'] = getattr(employee, 'organization_name')
         
         return jwt.encode(payload, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM)
+
+    async def create_refresh_token(self, employee_id: int) -> str:
+        """Create long-lived Refresh Token (7 days)"""
+        payload = {
+            'sub': str(employee_id),
+            'type': 'refresh',
+            'exp': datetime.utcnow() + timedelta(days=config.REFRESH_TOKEN_EXPIRE_DAYS)
+        }
+        return jwt.encode(payload, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM)
+
+    async def refresh_access_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Verify refresh token and issue new access/refresh pair.
+        Returns dict with new tokens or None if invalid.
+        """
+        try:
+            payload = jwt.decode(refresh_token, config.JWT_SECRET, algorithms=[config.JWT_ALGORITHM])
+            if payload.get('type') != 'refresh':
+                return None
+                
+            employee_id = int(payload.get('sub'))
+            employee = await Employee.find_by_id(employee_id)
+            if not employee or not employee.is_active:
+                return None
+                
+            # Issue new pair (Rotation)
+            new_access = await self.create_access_token(employee)
+            new_refresh = await self.create_refresh_token(employee.id)
+            
+            return {
+                'access_token': new_access,
+                'refresh_token': new_refresh,
+                'token_type': 'bearer',
+                'employee': employee.to_dict()
+            }
+        except (jwt.InvalidTokenError, ValueError):
+            return None
     
     def decode_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Decode and validate JWT token"""
@@ -128,13 +175,14 @@ class AuthService(BaseService):
         employee_id: int,
         organization_id: int,
         organization_name: str
-    ) -> Optional[str]:
-        """Create token with organization context"""
+    ) -> Optional[Dict[str, str]]:
+        """Create tokens with organization context"""
         employee = await Employee.find_by_id(employee_id)
         if not employee:
             return None
         
-        token = self.create_token(employee, organization_id, organization_name)
+        access_token = await self.create_access_token(employee, organization_id, organization_name)
+        refresh_token = await self.create_refresh_token(employee.id)
         
         await self.audit_service.log_organization_action(
             organization_id=organization_id,
@@ -142,15 +190,19 @@ class AuthService(BaseService):
             performed_by=employee_id
         )
         
-        return token
+        return {
+            'access_token': access_token,
+            'refresh_token': refresh_token
+        }
     
-    async def exit_organization(self, employee_id: int, organization_id: int) -> Optional[str]:
-        """Create token without organization context"""
+    async def exit_organization(self, employee_id: int, organization_id: int) -> Optional[Dict[str, str]]:
+        """Create tokens without organization context"""
         employee = await Employee.find_by_id(employee_id)
         if not employee:
             return None
         
-        token = self.create_token(employee)
+        access_token = await self.create_access_token(employee)
+        refresh_token = await self.create_refresh_token(employee.id)
         
         await self.audit_service.log_organization_action(
             organization_id=organization_id,
@@ -158,4 +210,7 @@ class AuthService(BaseService):
             performed_by=employee_id
         )
         
-        return token
+        return {
+            'access_token': access_token,
+            'refresh_token': refresh_token
+        }

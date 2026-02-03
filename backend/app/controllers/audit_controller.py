@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from app.controllers.base import BaseController
 from app.models.audit_log import AuditLog
-from app.utils.auth import require_admin
+from app.utils.auth import require_permission
 
 
 class AuditController(BaseController):
@@ -35,7 +35,7 @@ class AuditController(BaseController):
         to_date: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("audit.view"))
     ):
         """Get audit logs with filtering"""
         logs = await AuditLog.find_all(
@@ -68,7 +68,7 @@ class AuditController(BaseController):
     
     async def get_audit_stats(
         self,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("audit.view"))
     ):
         """Get audit log statistics"""
         return await AuditLog.get_statistics()
@@ -76,7 +76,7 @@ class AuditController(BaseController):
     async def get_audit_log(
         self,
         audit_id: int,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("audit.view"))
     ):
         """Get single audit log by ID"""
         log = await AuditLog.find_by_id(audit_id)
@@ -88,7 +88,7 @@ class AuditController(BaseController):
         self,
         entity_type: str,
         entity_id: int,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("audit.view"))
     ):
         """Get all audit logs for a specific entity"""
         logs = await AuditLog.find_by_entity(entity_type, entity_id)

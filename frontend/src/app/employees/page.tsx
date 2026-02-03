@@ -29,16 +29,18 @@ interface Employee {
 interface Grade { id: number; code: string; name: string; }
 interface Location { id: number; code: string; name: string; }
 interface Unit { id: number; code: string; name: string; }
+interface Role { id: number; code: string; name: string; }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 export default function EmployeesPage() {
   const router = useRouter();
-  const { isAuthenticated, isAdmin, isManager, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, hasPermission } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -65,6 +67,9 @@ export default function EmployeesPage() {
     role: 'employee',
   });
 
+  // Permission-based access
+  const canViewEmployees = hasPermission('employees.read.all');
+
   useEffect(() => {
     if (isLoading) return;
     
@@ -73,14 +78,14 @@ export default function EmployeesPage() {
       return;
     }
     
-    if (!isAdmin && !isManager) {
+    if (!canViewEmployees) {
       router.push('/my-claims');
       return;
     }
 
     fetchEmployees();
     fetchDropdowns();
-  }, [roleFilter, includeInactive, isLoading, isAuthenticated, isAdmin, isManager, router]);
+  }, [roleFilter, includeInactive, isLoading, isAuthenticated, canViewEmployees, router]);
 
   async function fetchEmployees() {
     try {
@@ -107,10 +112,11 @@ export default function EmployeesPage() {
       const token = localStorage.getItem('auth_token');
       const headers = { 'Authorization': `Bearer ${token}` };
       
-      const [gradesRes, locationsRes, unitsRes] = await Promise.all([
+      const [gradesRes, locationsRes, unitsRes, rolesRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/grades`, { headers }),
         fetch(`${API_BASE_URL}/api/locations`, { headers }),
         fetch(`${API_BASE_URL}/api/units`, { headers }),
+        fetch(`${API_BASE_URL}/api/roles`, { headers }),
       ]);
       
       if (gradesRes.ok) {
@@ -124,6 +130,11 @@ export default function EmployeesPage() {
       if (unitsRes.ok) {
         const data = await unitsRes.json();
         setUnits(data.units || []);
+      }
+      if (rolesRes.ok) {
+        const data = await rolesRes.json();
+        // API returns array directly, not { roles: [...] }
+        setRoles(Array.isArray(data) ? data : (data.roles || []));
       }
     } catch (err) {
       console.error('Error fetching dropdowns:', err);
@@ -500,9 +511,10 @@ export default function EmployeesPage() {
                       required
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
                     >
-                      <option value="employee">Staff</option>
-                      <option value="manager">Manager</option>
-                      <option value="admin">Admin</option>
+                      <option value="">Select Role</option>
+                      {roles.map((role) => (
+                        <option key={role.id} value={role.code}>{role.name}</option>
+                      ))}
                     </select>
                   </div>
                   <div>

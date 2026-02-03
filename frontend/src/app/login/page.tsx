@@ -66,15 +66,38 @@ export default function LoginPage() {
       }
 
       const data = await res.json();
-      login(data.access_token, data.employee);
+      login(data.access_token, data.refresh_token, data.employee);
 
-      // Redirect based on role
-      if (data.employee.role === 'super_admin') {
-        router.push('/organizations');  // Super admin goes to org list
-      } else if (data.employee.role === 'admin' || data.employee.role === 'manager') {
+      // Smart redirect based on permissions
+      const permissions = data.employee.permissions || [];
+      const role = data.employee.role;
+      
+      // Super admin goes to organizations
+      if (role === 'super_admin') {
+        router.push('/organizations');
+      }
+      // Check permissions and redirect to first available page
+      else if (permissions.some((p: string) => p.includes('dashboard.view'))) {
+        router.push('/');
+      }
+      else if (permissions.some((p: string) => ['claims.read.all', 'claims.read.team', 'claims.approve'].includes(p))) {
         router.push('/claims');
-      } else {
+      }
+      else if (permissions.some((p: string) => ['claims.read.own', 'claims.create'].includes(p))) {
         router.push('/my-claims');
+      }
+      else if (permissions.includes('audit.view')) {
+        router.push('/audit-logs');
+      }
+      else if (permissions.some((p: string) => ['config.view', 'config.manage'].includes(p))) {
+        router.push('/settings');
+      }
+      else if (permissions.includes('employees.read.all')) {
+        router.push('/employees');
+      }
+      else {
+        // Fallback to home/dashboard
+        router.push('/');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to verify OTP');

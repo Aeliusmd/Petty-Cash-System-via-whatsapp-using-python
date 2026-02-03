@@ -5,6 +5,7 @@ OOP class for employee business logic
 
 from typing import Optional, List, Dict, Any
 from fastapi import Request
+from app.db import db
 from app.services.base import BaseService
 from app.services.audit_service import AuditService
 from app.models.employee import Employee
@@ -21,6 +22,7 @@ class EmployeeService(BaseService):
         super().__init__(request)
         self.audit_service = audit_service or AuditService(request)
     
+    # ... (get methods remain same) ...
     async def get_employee(self, employee_id: int) -> Optional[Employee]:
         """Get employee by ID"""
         return await Employee.find_by_id(employee_id)
@@ -48,6 +50,26 @@ class EmployeeService(BaseService):
             include_inactive=include_inactive
         )
     
+    async def _resolve_role_id(self, role_code: str, organization_id: int) -> Optional[int]:
+        """Helper to find role ID for a given code and organization"""
+        if not role_code or not organization_id:
+            return None
+            
+        # Try to find org-specific role first
+        role_id = await db.fetchval("""
+            SELECT id FROM roles 
+            WHERE code = $1 AND organization_id = $2
+        """, role_code, organization_id)
+        
+        # Fallback to system role if not found (though system roles shouldn't be used directly anymore)
+        if not role_id:
+            role_id = await db.fetchval("""
+                SELECT id FROM roles 
+                WHERE code = $1 AND organization_id IS NULL AND is_system_role = TRUE
+            """, role_code)
+            
+        return role_id
+
     async def create_employee(
         self,
         data: Dict[str, Any],
@@ -55,6 +77,21 @@ class EmployeeService(BaseService):
         organization_id: int = None
     ) -> Employee:
         """Create new employee with audit logging"""
+        
+        # Auto-resolve role_id if missing but role string is present
+        if 'role' in data and not data.get('role_id'):
+            # Logic to find organization_id if not provided (e.g. from unit)
+            # But here we rely on the controller/auth context usually
+            org_id = organization_id
+            if not org_id and 'unit_id' in data:
+                 # Fetch unit to get org_id
+                 unit = await db.query_one("SELECT organization_id FROM units WHERE id = $1", data['unit_id'])
+                 if unit:
+                     org_id = unit['organization_id']
+            
+            if org_id:
+                data['role_id'] = await self._resolve_role_id(data['role'], org_id)
+
         employee = await Employee.create(data)
         
         await self.audit_service.log_employee_action(
@@ -79,6 +116,13 @@ class EmployeeService(BaseService):
         current = await Employee.find_by_id(employee_id)
         if not current:
             return None
+            
+        # Auto-resolve role_id if role is being updated but role_id is missing
+        if 'role' in data and not data.get('role_id'):
+            # Use employee's organization
+            org_id = current.organization_id
+            if org_id:
+                data['role_id'] = await self._resolve_role_id(data['role'], org_id)
         
         old_values = current.to_dict()
         employee = await Employee.update(employee_id, data)
@@ -166,6 +210,14 @@ class EmployeeService(BaseService):
         }
         
         update_data = {'role': new_role}
+        
+        # Resolve role_id
+        org_id = current.organization_id
+        if org_id:
+            role_id = await self._resolve_role_id(new_role, org_id)
+            if role_id:
+                update_data['role_id'] = role_id
+                
         if is_admin is not None:
             update_data['is_admin'] = is_admin
         if is_manager is not None:

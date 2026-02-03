@@ -21,8 +21,14 @@ class VerifyOTPRequest(BaseModel):
 class LoginResponse(BaseModel):
     """Response after successful login"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     employee: dict
+
+
+class RefreshTokenRequest(BaseModel):
+    """Request for refreshing access token"""
+    refresh_token: str
 
 
 class TokenPayload(BaseModel):

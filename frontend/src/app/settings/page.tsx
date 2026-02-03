@@ -26,7 +26,7 @@ interface Category {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { isAdmin, user, token, isLoading } = useAuth();
+  const { user, token, isLoading, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
   const [accessDenied, setAccessDenied] = useState(false);
 
@@ -52,17 +52,35 @@ export default function SettingsPage() {
     prompt_message: ''
   });
 
+  // Permission-based access - allow view or manage
+  const canViewConfig = hasPermission('config.view');
+  const canManageConfig = hasPermission('config.manage');
+  const hasConfigAccess = canViewConfig || canManageConfig;
+
   useEffect(() => {
+    console.log('Settings Page Debug:', {
+      isLoading,
+      userExists: !!user,
+      u_role: user?.role,
+      u_permissions: user?.permissions,
+      u_org_id: user?.organization_id,
+      canView: canViewConfig,
+      canManage: canManageConfig,
+      hasAccess: hasConfigAccess
+    });
+
     if (isLoading) return;
 
-    if (!isAdmin || !user?.organization_id) {
+    if (!hasConfigAccess || !user?.organization_id) {
+      console.warn('Access Denied: Missing permissions or org_id');
       setAccessDenied(true);
-      setTimeout(() => router.push('/'), 2000);
+      // Removed timeout redirect for debugging
+      // setTimeout(() => router.push('/'), 2000);
       return;
     }
 
     fetchDepartments();
-  }, [isAdmin, user, isLoading, router]);
+  }, [hasConfigAccess, user, isLoading, router]);
 
   const fetchDepartments = async () => {
     try {

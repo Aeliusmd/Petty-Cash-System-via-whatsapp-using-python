@@ -12,7 +12,7 @@ from app.schemas.claim import (
     ClaimCreate, ClaimUpdate, ClaimApproveRequest, ClaimRejectRequest, 
     ClaimAppealRequest, ClaimResponse, ClaimListResponse
 )
-from app.utils.auth import require_authenticated, require_admin
+from app.utils.auth import require_authenticated, require_permission
 from pathlib import Path
 import asyncio
 import uuid
@@ -50,39 +50,29 @@ class ClaimController(BaseController):
         employee_id: Optional[int] = None,
         auth: dict = Depends(require_authenticated)
     ):
-        """Get claims - staff see own, managers see pending, filtered by organization"""
+        """Get claims - filtered by permissions"""
         service = ClaimService(request)
+        permissions = auth.get('permissions', [])
         
         # Get organization context
         organization_id = auth.get('organization_id')
-        role = auth.get('role', 'employee')
-        
-        # Logic for employee_id filter:
-        # 1. If passed, verify permissions (only admin/manager can see others)
-        # 2. If NOT passed:
-        #    - Employee: default to own ID
-        #    - Admin/Super Admin/Manager: default to None (show all/team)
         
         target_employee_id = employee_id
         
         if target_employee_id:
             # If requesting someone else's claims, check permission
             if target_employee_id != auth['employee_id']:
-                if role not in ['admin', 'super_admin', 'manager']:
+                if 'claims.read.all' not in permissions and 'claims.read.team' not in permissions:
                      raise HTTPException(status_code=403, detail="Cannot view other employees' claims")
         else:
             # No specific employee requested
-            if role in ['admin', 'super_admin']:
+            if 'claims.read.all' in permissions:
                 target_employee_id = None # Show all
-            elif role == 'manager':
-                target_employee_id = auth['employee_id'] # Managers see own claims by default here, or pending via other endpoint
-                # NOTE: If managers should see TEAM claims here, logic needs adjustment. 
-                # Usually standard managers only see their own claims in "My Claims" and team claims in "Pending"
             else:
-                target_employee_id = auth['employee_id'] # Employees only see own
+                target_employee_id = auth['employee_id'] # Fallback to own
         
         # Super admin sees all claims unless they've explicitly entered an org
-        if role == 'super_admin' and not auth.get('organization_name'):
+        if auth.get('role') == 'super_admin' and not auth.get('organization_name'):
             organization_id = None
         
         result = await service.get_claims_by_employee(
@@ -103,18 +93,19 @@ class ClaimController(BaseController):
         request: Request,
         auth: dict = Depends(require_authenticated)
     ):
-        """Get pending claims for manager, filtered by organization"""
-        if not auth.get('is_manager') and not auth.get('is_admin') and auth.get('role') != 'super_admin':
-            raise HTTPException(status_code=403, detail="Managers only")
+        """Get pending claims for manager/approver"""
+        permissions = auth.get('permissions', [])
+        
+        if 'claims.approve' not in permissions and 'claims.read.team' not in permissions:
+            raise HTTPException(status_code=403, detail="Approver permissions required")
         
         service = ClaimService(request)
         
         # Get organization context
         organization_id = auth.get('organization_id')
-        role = auth.get('role', 'employee')
         
         # Super admin sees all pending claims unless they've explicitly entered an org
-        if role == 'super_admin' and not auth.get('organization_name'):
+        if auth.get('role') == 'super_admin' and not auth.get('organization_name'):
             organization_id = None
         
         claims = await service.get_pending_claims_for_manager(
@@ -147,10 +138,19 @@ class ClaimController(BaseController):
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
         
-        # Check access: own claim or manager/admin
-        if claim.employee_id != auth['employee_id'] and not auth.get('is_admin'):
-            if claim.manager_id != auth['employee_id']:
-                raise HTTPException(status_code=403, detail="Access denied")
+        # Check access
+        permissions = auth.get('permissions', [])
+        is_own = claim.employee_id == auth['employee_id']
+        is_manager = claim.manager_id == auth['employee_id']
+        
+        if is_own:
+            pass # OK
+        elif is_manager and ('claims.read.team' in permissions or 'claims.approve' in permissions):
+            pass # OK
+        elif 'claims.read.all' in permissions:
+            pass # OK
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
         
         return claim.to_dict()
     
@@ -190,7 +190,7 @@ class ClaimController(BaseController):
         description: str = Form(None),
         location_id: int = Form(None),
         receipts: List[UploadFile] = File(None),
-        auth: dict = Depends(require_authenticated)
+        auth: dict = Depends(require_permission("claims.create"))
     ):
         """Create new claim with optional receipt upload"""
         service = ClaimService(request)
@@ -264,12 +264,9 @@ class ClaimController(BaseController):
         claim_id: int,
         data: ClaimApproveRequest,
         request: Request,
-        auth: dict = Depends(require_authenticated)
+        auth: dict = Depends(require_permission("claims.approve"))
     ):
         """Approve a claim"""
-        if not auth.get('is_manager') and not auth.get('is_admin'):
-            raise HTTPException(status_code=403, detail="Managers only")
-        
         service = ClaimService(request)
         
         claim = await service.approve_claim(
@@ -295,12 +292,9 @@ class ClaimController(BaseController):
         claim_id: int,
         data: ClaimRejectRequest,
         request: Request,
-        auth: dict = Depends(require_authenticated)
+        auth: dict = Depends(require_permission("claims.reject"))
     ):
         """Reject a claim"""
-        if not auth.get('is_manager') and not auth.get('is_admin'):
-            raise HTTPException(status_code=403, detail="Managers only")
-        
         service = ClaimService(request)
         
         claim = await service.reject_claim(
@@ -326,7 +320,7 @@ class ClaimController(BaseController):
         claim_id: int,
         data: ClaimAppealRequest,
         request: Request,
-        auth: dict = Depends(require_authenticated)
+        auth: dict = Depends(require_permission("claims.appeal"))
     ):
         """Appeal a rejected claim"""
         service = ClaimService(request)
@@ -352,7 +346,7 @@ class ClaimController(BaseController):
         self,
         claim_id: int,
         request: Request,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("claims.delete.all"))
     ):
         """Delete a claim (admin only)"""
         service = ClaimService(request)

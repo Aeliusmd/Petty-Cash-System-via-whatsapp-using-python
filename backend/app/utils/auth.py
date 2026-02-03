@@ -100,3 +100,54 @@ def check_role(user: dict, required_role: str) -> bool:
     required_level = role_hierarchy.get(required_role, 0)
     
     return user_level >= required_level
+
+
+def require_permission(required_perm: str):
+    """
+    Dependency factory to check for specific permission.
+    
+    IMPORTANT: Loads permissions fresh from database on each request
+    to ensure permission changes take effect immediately without re-login.
+    
+    Usage: user = Depends(require_permission("claims.create"))
+    """
+    async def _check_permission(authorization: str = Header(None)) -> dict:
+        payload = await get_current_user(authorization)
+        
+        # Super admin bypass - always has all permissions
+        if payload.get("role") == "super_admin":
+            return payload
+        
+        # Load permissions FRESH from database (not from cached JWT)
+        from app.models.employee import Employee
+        
+        employee_id = payload.get("employee_id")
+        if not employee_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing employee_id")
+        
+        employee = await Employee.find_by_id(employee_id)
+        if not employee:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        # Get current permissions from database (reflects latest role changes)
+        permissions = await employee.get_permissions()
+        
+        if required_perm not in permissions:
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Access denied: Missing permission '{required_perm}'"
+            )
+        
+        # Add fresh permissions to payload for downstream use
+        payload['permissions'] = permissions
+        
+        # Update payload with fresh data from DB to ensure controllers have latest context
+        if hasattr(employee, 'organization_id'):
+            payload['organization_id'] = employee.organization_id
+        if hasattr(employee, 'role'):
+            payload['role'] = employee.role
+            
+        return payload
+    
+    return _check_permission
+

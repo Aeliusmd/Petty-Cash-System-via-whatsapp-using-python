@@ -77,7 +77,7 @@ function getCategoryIcon(code: string): string {
 
 function ClaimsContent() {
   const router = useRouter();
-  const { isAuthenticated, isAdmin, isManager, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, hasAnyPermission } = useAuth();
   const searchParams = useSearchParams();
   const statusFilter = searchParams.get('status') || '';
   
@@ -105,20 +105,23 @@ function ClaimsContent() {
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // Permission-based access
+  const canViewAllClaims = hasAnyPermission(['claims.read.all', 'claims.read.team', 'claims.approve']);
+
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) {
       router.push('/login');
       return;
     }
-    // Optional: add role check if needed, though API will 403
-    if (!isAdmin && !isManager) {
+    // Check permission for this page
+    if (!canViewAllClaims) {
         router.push('/my-claims');
         return;
     }
     
     fetchEmployees();
-  }, [isLoading, isAuthenticated, isAdmin, isManager, router]);
+  }, [isLoading, isAuthenticated, canViewAllClaims, router]);
 
 
   useEffect(() => {

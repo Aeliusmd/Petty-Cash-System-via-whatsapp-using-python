@@ -31,7 +31,7 @@ interface FilterState {
 
 export default function AuditLogsPage() {
   const router = useRouter();
-  const { token, isAuthenticated, isAdmin } = useAuth();
+  const { token, isAuthenticated, hasPermission } = useAuth();
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -45,21 +45,24 @@ export default function AuditLogsPage() {
     to_date: '',
   });
 
-  // Check authentication and admin access
+  // Permission-based access
+  const canViewAuditLogs = hasPermission('audit.view');
+
+  // Check authentication and permission access
   useEffect(() => {
     if (!isAuthenticated) {
       router.push('/login');
       return;
     }
-    if (!isAdmin) {
-      alert('Access denied. Admin privileges required.');
+    if (!canViewAuditLogs) {
+      alert('Access denied. Audit view permission required.');
       router.push('/');
       return;
     }
-  }, [isAuthenticated, isAdmin, router]);
+  }, [isAuthenticated, canViewAuditLogs, router]);
 
   useEffect(() => {
-    if (isAuthenticated && isAdmin) {
+    if (isAuthenticated && canViewAuditLogs) {
       fetchAuditLogs();
       
       // Auto-refresh every 10 seconds
@@ -69,7 +72,7 @@ export default function AuditLogsPage() {
       
       return () => clearInterval(interval);
     }
-  }, [page, filters, isAuthenticated, isAdmin]);
+  }, [page, filters, isAuthenticated, canViewAuditLogs]);
 
   const fetchAuditLogs = async () => {
     try {

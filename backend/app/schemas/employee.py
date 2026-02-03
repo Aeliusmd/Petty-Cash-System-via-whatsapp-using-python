@@ -38,6 +38,7 @@ class EmployeeUpdate(BaseModel):
     location_id: Optional[int] = None
     manager_id: Optional[int] = None
     role: Optional[str] = None
+    role_id: Optional[int] = None  # RBAC role ID
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
     is_manager: Optional[bool] = None

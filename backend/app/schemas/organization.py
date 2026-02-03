@@ -88,6 +88,7 @@ class UnitListResponse(BaseModel):
 class EnterOrganizationResponse(BaseModel):
     """Response after entering an organization"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     organization: OrganizationResponse
     employee: dict
@@ -96,5 +97,6 @@ class EnterOrganizationResponse(BaseModel):
 class ExitOrganizationResponse(BaseModel):
     """Response after exiting an organization"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     employee: dict

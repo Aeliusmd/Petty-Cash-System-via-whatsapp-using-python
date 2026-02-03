@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.controllers.base import BaseController
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryResponse
-from app.utils.auth import require_admin, require_authenticated
+from app.utils.auth import require_permission, require_authenticated
 
 
 class CategoryController(BaseController):
@@ -56,7 +56,7 @@ class CategoryController(BaseController):
     async def create_category(
         self,
         data: CategoryCreate,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("config.manage"))
     ):
         """Create new category"""
         category = await Category.create(data.model_dump(exclude_none=True))
@@ -66,7 +66,7 @@ class CategoryController(BaseController):
         self,
         category_id: int,
         data: CategoryUpdate,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("config.manage"))
     ):
         """Update existing category"""
         category = await Category.update(category_id, data.model_dump(exclude_none=True))
@@ -77,7 +77,7 @@ class CategoryController(BaseController):
     async def delete_category(
         self,
         category_id: int,
-        auth: dict = Depends(require_admin)
+        auth: dict = Depends(require_permission("config.manage"))
     ):
         """Delete category (soft delete)"""
         success = await Category.delete(category_id)

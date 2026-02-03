@@ -33,9 +33,12 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isAdmin, isManager, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading, hasAnyPermission } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+
+  // Permission-based access check
+  const canViewDashboard = hasAnyPermission(['dashboard.view.org', 'dashboard.view.team']);
 
   useEffect(() => {
     // If auth is loading, do nothing yet
@@ -47,15 +50,28 @@ export default function DashboardPage() {
       return;
     }
 
-    // Role-based redirect for pure employees
-    if (!isAdmin && !isManager) {
-      router.push('/my-claims');
+    // No dashboard permission -> Redirect to appropriate page
+    if (!canViewDashboard) {
+      // Find a page they CAN access
+      const permissions = user?.permissions || [];
+      if (permissions.some(p => ['claims.read.all', 'claims.read.team', 'claims.approve'].includes(p))) {
+        router.push('/claims');
+      } else if (permissions.some(p => ['claims.read.own', 'claims.create'].includes(p))) {
+        router.push('/my-claims');
+      } else if (permissions.includes('audit.view')) {
+        router.push('/audit-logs');
+      } else if (permissions.some(p => ['config.view', 'config.manage'].includes(p))) {
+        router.push('/settings');
+      } else if (permissions.includes('employees.read.all')) {
+        router.push('/employees');
+      }
+      // If none match, stay on dashboard (will show loading or empty state)
       return;
     }
 
     // If we're here, we are authenticated and authorized to view dashboard
     fetchStats();
-  }, [isAuthenticated, isAdmin, isManager, isLoading, router]);
+  }, [isAuthenticated, canViewDashboard, isLoading, router]);
 
   async function fetchStats() {
     try {
@@ -84,7 +100,7 @@ export default function DashboardPage() {
   }
 
   // Show loading while fetching stats
-  if (isAuthenticated && (isAdmin || isManager) && loadingStats) {
+  if (isAuthenticated && canViewDashboard && loadingStats) {
      return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
@@ -93,7 +109,7 @@ export default function DashboardPage() {
   }
 
   // Don't render if not authenticated (will redirect)
-  if (!isAuthenticated || (!isAdmin && !isManager)) {
+  if (!isAuthenticated || !canViewDashboard) {
     return null;
   }
 

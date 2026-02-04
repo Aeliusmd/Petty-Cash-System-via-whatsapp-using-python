@@ -13,7 +13,7 @@ from app.config import config
 # Get JWT secret from config
 JWT_SECRET = config.JWT_SECRET
 JWT_ALGORITHM = config.JWT_ALGORITHM
-JWT_EXPIRY_HOURS = config.JWT_EXPIRY_HOURS
+ACCESS_TOKEN_EXPIRE_MINUTES = config.ACCESS_TOKEN_EXPIRE_MINUTES
 
 
 def create_access_token(
@@ -58,7 +58,7 @@ def create_access_token(
         'is_manager': is_manager or final_role in ('manager', 'admin', 'super_admin'),
         'organization_id': organization_id,
         'organization_name': organization_name,
-        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS),
+        'exp': datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         'iat': datetime.utcnow()
     }
     

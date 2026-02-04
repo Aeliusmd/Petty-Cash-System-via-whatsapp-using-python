@@ -146,9 +146,14 @@ async def handle_message_event(payload: dict):
                 if media_data:
                     image_bytes = base64.b64decode(media_data)
                 elif media_url:
-                    # Fix Docker networking: replace localhost with waha container name
-                    if 'localhost' in media_url or '127.0.0.1' in media_url:
-                        print(f"🔄 Fixing media URL for Docker: {media_url}")
+                    # Use WAHA_BASE_URL from config to determine correct hostname
+                    from app.config import Config
+                    waha_base = Config.WAHA_BASE_URL
+                    
+                    # If WAHA is at localhost (local dev), keep localhost
+                    # If WAHA is at waha:3000 (full Docker), replace localhost with waha
+                    if 'localhost' not in waha_base and 'localhost' in media_url:
+                        print(f"🔄 Fixing media URL for Docker deployment")
                         media_url = media_url.replace('localhost', 'waha').replace('127.0.0.1', 'waha')
                     
                     print(f"⬇️ Downloading media from: {media_url}")

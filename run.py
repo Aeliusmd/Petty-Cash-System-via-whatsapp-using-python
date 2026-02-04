@@ -14,8 +14,17 @@ backend_dir = root_dir / 'backend'
 sys.path.insert(0, str(backend_dir))
 
 # Load environment from root
+# Priority: .env.local (for local dev) > .env (for Docker/default)
 from dotenv import load_dotenv
-load_dotenv(root_dir / '.env')
+env_local = root_dir / '.env.local'
+env_default = root_dir / '.env'
+
+if env_local.exists():
+    load_dotenv(env_local)
+    print(f"📄 Loaded environment from: .env.local (LOCAL DEVELOPMENT MODE)")
+else:
+    load_dotenv(env_default)
+    print(f"📄 Loaded environment from: .env")
 
 if __name__ == "__main__":
     import uvicorn

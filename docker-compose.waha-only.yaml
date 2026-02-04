@@ -1,0 +1,59 @@
+# Docker Compose - WAHA Only (Development Mode)
+# Use this when running Backend and Frontend locally outside Docker
+# 
+# Usage:
+#   docker compose -f docker-compose.waha-only.yaml up
+#
+# https://waha.devlike.pro/docs/how-to/install/
+
+services:
+  # ========================================
+  # WAHA - WhatsApp HTTP API
+  # ========================================
+  waha:
+    restart: always
+    image: devlikeapro/waha:latest
+
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+    ports:
+      - "127.0.0.1:3000:3000/tcp"
+
+    volumes:
+      - "./sessions:/app/.sessions"
+      - "./media:/app/.media"
+
+    env_file:
+      - .env
+
+    environment:
+      # Backend running locally on host machine
+      - WHATSAPP_HOOK_URL=http://host.docker.internal:4101/webhooks/waha
+      - WHATSAPP_HOOK_EVENTS=message
+      - WHATSAPP_HOOK_HMAC_KEY=supersecretkey
+      # NOWEB engine: Stable, fast, supports forwardMessage
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WAHA_LOG_FORMAT=PRETTY
+      - WHATSAPP_DOWNLOAD_MEDIA=true
+      # Store config optional now since we have manual fix, but good to keep
+      - WAHA_NOWEB_STORE_ENABLED=true
+      - WAHA_NOWEB_STORE_FULL_SYNC=true
+
+    # Map host.docker.internal to host machine (Windows compatibility)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - petty-cash-network
+
+networks:
+  petty-cash-network:
+    driver: bridge

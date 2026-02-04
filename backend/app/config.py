@@ -29,7 +29,8 @@ class Config:
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv('REFRESH_TOKEN_EXPIRE_DAYS', '7'))
     
     # WAHA (WhatsApp HTTP API)
-    WAHA_BASE_URL: str = os.getenv('WAHA_BASE_URL', 'http://waha:3000')
+    # Default to localhost for local dev; override with env var for Docker
+    WAHA_BASE_URL: str = os.getenv('WAHA_BASE_URL', 'http://localhost:3000')
     WAHA_SESSION: str = os.getenv('WAHA_SESSION', 'default')
     WAHA_API_KEY: str = os.getenv('WAHA_API_KEY', '')
     

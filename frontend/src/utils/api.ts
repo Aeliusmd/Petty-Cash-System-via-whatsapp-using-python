@@ -16,6 +16,8 @@ export async function authenticatedFetch(
   const headers = {
     ...options.headers,
     'Authorization': `Bearer ${token}`,
+    // Bypass Ngrok browser warning for free tier
+    'ngrok-skip-browser-warning': 'true',
   };
 
   const response = await fetch(url, {

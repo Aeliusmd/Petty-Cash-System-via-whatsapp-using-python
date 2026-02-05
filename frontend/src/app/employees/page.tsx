@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { authenticatedFetch } from '@/utils/api';
 
 interface Employee {
   id: number;
@@ -90,14 +91,12 @@ export default function EmployeesPage() {
   async function fetchEmployees() {
     try {
       setLoading(true);
-      const token = localStorage.getItem('auth_token');
       let url = `${API_BASE_URL}/api/employees?include_inactive=${includeInactive}`;
       if (roleFilter) url += `&role=${roleFilter}`;
       
-      const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authenticatedFetch(url);
       if (!res.ok) throw new Error('Failed to fetch employees');
+      
       const data = await res.json();
       setEmployees(data.employees || []);
     } catch (err) {
@@ -109,14 +108,11 @@ export default function EmployeesPage() {
 
   async function fetchDropdowns() {
     try {
-      const token = localStorage.getItem('auth_token');
-      const headers = { 'Authorization': `Bearer ${token}` };
-      
       const [gradesRes, locationsRes, unitsRes, rolesRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/grades`, { headers }),
-        fetch(`${API_BASE_URL}/api/locations`, { headers }),
-        fetch(`${API_BASE_URL}/api/units`, { headers }),
-        fetch(`${API_BASE_URL}/api/roles`, { headers }),
+        authenticatedFetch(`${API_BASE_URL}/api/grades`),
+        authenticatedFetch(`${API_BASE_URL}/api/locations`),
+        authenticatedFetch(`${API_BASE_URL}/api/units`),
+        authenticatedFetch(`${API_BASE_URL}/api/roles`),
       ]);
       
       if (gradesRes.ok) {
@@ -186,15 +182,13 @@ export default function EmployeesPage() {
         manager_id: formData.manager_id ? parseInt(formData.manager_id) : null,
       };
 
-      const token = localStorage.getItem('auth_token');
       const url = editingEmployee 
         ? `${API_BASE_URL}/api/employees/${editingEmployee.id}`
         : `${API_BASE_URL}/api/employees`;
       
-      const res = await fetch(url, {
+      const res = await authenticatedFetch(url, {
         method: editingEmployee ? 'PUT' : 'POST',
         headers: { 
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json' 
         },
         body: JSON.stringify(payload),
@@ -219,11 +213,9 @@ export default function EmployeesPage() {
     if (!confirm(`Are you sure you want to permanently delete ${employee.name}? This action cannot be undone.`)) return;
     
     try {
-      const token = localStorage.getItem('auth_token');
       // Use permanent=true to delete from database instead of soft delete
-      const res = await fetch(`${API_BASE_URL}/api/employees/${employee.id}?permanent=true`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/employees/${employee.id}?permanent=true`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
       });
       
       if (!res.ok) {

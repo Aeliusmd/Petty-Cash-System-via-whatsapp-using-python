@@ -124,15 +124,16 @@ export async function fetchClaims(params?: {
   if (params?.limit) searchParams.set('limit', params.limit.toString());
   if (params?.offset) searchParams.set('offset', params.offset.toString());
   
-  const res = await fetch(`${API_BASE_URL}/api/claims?${searchParams}`, {
+  const res = await authenticatedFetch(`${API_BASE_URL}/api/claims?${searchParams}`, {
     cache: 'no-store',
   });
+  
   if (!res.ok) throw new Error('Failed to fetch claims');
   return res.json();
 }
 
 export async function fetchClaim(id: number): Promise<Claim> {
-  const res = await fetch(`${API_BASE_URL}/api/claims/${id}`, {
+  const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/${id}`, {
     cache: 'no-store',
   });
   if (!res.ok) throw new Error('Failed to fetch claim');
@@ -140,7 +141,7 @@ export async function fetchClaim(id: number): Promise<Claim> {
 }
 
 export async function fetchStats(): Promise<Stats> {
-  const res = await fetch(`${API_BASE_URL}/api/stats`, {
+  const res = await authenticatedFetch(`${API_BASE_URL}/api/stats`, {
     cache: 'no-store',
   });
   if (!res.ok) throw new Error('Failed to fetch stats');
@@ -148,7 +149,7 @@ export async function fetchStats(): Promise<Stats> {
 }
 
 export async function approveClaim(id: number): Promise<{ success: boolean; message: string }> {
-  const res = await fetch(`${API_BASE_URL}/api/claims/${id}/approve`, {
+  const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/${id}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -160,7 +161,7 @@ export async function approveClaim(id: number): Promise<{ success: boolean; mess
 }
 
 export async function rejectClaim(id: number, reason: string): Promise<{ success: boolean; message: string }> {
-  const res = await fetch(`${API_BASE_URL}/api/claims/${id}/reject`, {
+  const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/${id}/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason }),

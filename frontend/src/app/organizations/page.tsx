@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { authenticatedFetch } from '@/utils/api';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 interface Organization {
   id: number;
@@ -42,20 +45,15 @@ export default function OrganizationsPage() {
     try {
       console.log('🔑 Fetching organizations...');
       
-      const authToken = localStorage.getItem('auth_token');
-      const res = await fetch('http://localhost:4101/api/organizations', {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      });
+      console.log('🔑 Fetching organizations...');
+      
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/organizations`);
       
       console.log(`📡 API Status: ${res.status} ${res.statusText}`);
       
       // If 401, clear auth and redirect (will be handled by page reload)
       if (res.status === 401) {
-        console.error('❌ 401 Unauthorized - Token invalid or expired');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('auth_user');
-        window.location.href = '/login';
+        // ... handled by authenticatedFetch actually
         return;
       }
       
@@ -97,15 +95,13 @@ export default function OrganizationsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const authToken = localStorage.getItem('auth_token');
       const url = editingUnit 
-        ? `http://localhost:4101/api/organizations/${editingUnit.id}`
-        : 'http://localhost:4101/api/organizations';
+        ? `${API_BASE_URL}/api/organizations/${editingUnit.id}`
+        : `${API_BASE_URL}/api/organizations`;
       
-      const res = await fetch(url, {
+      const res = await authenticatedFetch(url, {
         method: editingUnit ? 'PUT' : 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
@@ -126,10 +122,8 @@ export default function OrganizationsPage() {
     if (!confirm('Are you sure you want to delete this organization?')) return;
     
     try {
-      const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`http://localhost:4101/api/organizations/${id}`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/organizations/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${authToken}` }
       });
 
       if (res.ok) {

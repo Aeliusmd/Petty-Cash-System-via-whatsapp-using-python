@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { authenticatedFetch } from '@/utils/api';
 
 interface Permission {
   id: number;
@@ -79,10 +80,7 @@ export default function RolesPage() {
   async function fetchRoles() {
     try {
       setLoading(true);
-      // const token = sessionStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/roles`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/roles`);
       if (!res.ok) throw new Error('Failed to fetch roles');
       const data = await res.json();
       setRoles(data || []);
@@ -95,10 +93,7 @@ export default function RolesPage() {
 
   async function fetchPermissions() {
     try {
-      // const token = sessionStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/roles/permissions`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/roles/permissions`);
       if (!res.ok) throw new Error('Failed to fetch permissions');
       const data = await res.json();
       setAllPermissions(data || []);
@@ -159,10 +154,9 @@ export default function RolesPage() {
         ? `${API_BASE_URL}/api/roles/${editingRole.id}`
         : `${API_BASE_URL}/api/roles`;
 
-      const res = await fetch(url, {
+      const res = await authenticatedFetch(url, {
         method: editingRole ? 'PUT' : 'POST',
         headers: { 
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json' 
         },
         body: JSON.stringify(payload),
@@ -192,10 +186,8 @@ export default function RolesPage() {
     if (!confirm(`Are you sure you want to delete the role "${role.name}"?`)) return;
 
     try {
-      // const token = sessionStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/roles/${role.id}`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/roles/${role.id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (!res.ok) {

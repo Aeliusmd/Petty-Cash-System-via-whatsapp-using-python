@@ -229,8 +229,14 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* Help Section */}
-        <div className="mt-8 pt-6 border-t border-gray-200">
+        {/* Sign Up Section */}
+        <div className="mt-8 pt-6 border-t border-gray-200 space-y-3">
+          <p className="text-center text-sm text-gray-600">
+            Don't have an organization?{' '}
+            <a href="/signup" className="text-indigo-600 font-bold hover:underline">
+              Sign Up
+            </a>
+          </p>
           <p className="text-center text-sm text-gray-500 flex items-center justify-center gap-2">
             <span>❓</span>
             Need help? Contact your administrator

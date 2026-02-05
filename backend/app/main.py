@@ -30,6 +30,7 @@ from app.controllers.audit_controller import router as audit_router
 from app.controllers.dashboard_controller import router as dashboard_router
 from app.controllers.configuration_controller import router as config_router
 from app.controllers.role_controller import router as role_router
+from app.controllers.provisioning_controller import router as provisioning_router
 
 # Import webhook handler (will be moved to controller in next phase)
 from app.webhooks import webhook_router
@@ -120,6 +121,9 @@ app.include_router(config_router)
 
 # Role Management (RBAC)
 app.include_router(role_router)
+
+# Organization Signup (Provisioning)
+app.include_router(provisioning_router)
 
 # Webhooks (WhatsApp events)
 app.include_router(webhook_router)

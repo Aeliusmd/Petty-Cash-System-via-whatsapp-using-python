@@ -272,16 +272,30 @@ class ClaimService(BaseService):
         total_extracted = 0.0
         receipts_saved = []
         
-        # 1. Create receipt directory
-        receipts_dir = Path(f"/app/backend/receipts/{claim_id}")
-        receipts_dir.mkdir(parents=True, exist_ok=True)
+        # 1. Get receipts directory (handle both local and Docker environments)
+        possible_paths = [
+            Path("/app/backend/receipts"),  # Docker container
+            Path(__file__).resolve().parent.parent / "receipts",  # Local relative to app folder
+            Path("receipts").resolve()  # Current working directory
+        ]
+        
+        receipts_dir = None
+        for path in possible_paths:
+            if path.exists():
+                receipts_dir = path
+                break
+        
+        if not receipts_dir:
+            # Fallback: create relative to this file's location
+            receipts_dir = Path(__file__).resolve().parent.parent / "receipts"
+            receipts_dir.mkdir(parents=True, exist_ok=True)
         
         for receipt_data in receipt_files:
             content = receipt_data['bytes']
             filename = receipt_data.get('filename', 'receipt')
             content_type = receipt_data.get('content_type', 'image/jpeg')
             
-            # 2. Save file
+            # 2. Save file (flat structure, no subdirectories)
             ext = Path(filename).suffix or '.jpg'
             saved_filename = f"{uuid.uuid4()}{ext}"
             file_path = receipts_dir / saved_filename

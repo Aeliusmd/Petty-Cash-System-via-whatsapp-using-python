@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ClaimDetailsModal from '@/components/ClaimDetailsModal';
+import NewClaimModal from '@/components/NewClaimModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { authenticatedFetch } from '@/utils/api';
 
@@ -108,6 +109,10 @@ function ClaimsContent() {
 
   // Permission-based access
   const canViewAllClaims = hasAnyPermission(['claims.read.all', 'claims.read.team', 'claims.approve']);
+  const canCreateClaim = hasAnyPermission(['claims.create']);
+
+  // Modal state for new claim
+  const [showNewClaimModal, setShowNewClaimModal] = useState(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -300,7 +305,23 @@ function ClaimsContent() {
           <h2 className="text-2xl font-bold text-gray-800">Claims</h2>
           <p className="text-gray-900">{total} total claims</p>
         </div>
+        {/* New Claim Button - only visible with claims.create permission */}
+        {canCreateClaim && (
+          <button
+            onClick={() => setShowNewClaimModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-medium shadow-lg"
+          >
+            + New Claim
+          </button>
+        )}
       </div>
+
+      {/* New Claim Modal */}
+      <NewClaimModal
+        isOpen={showNewClaimModal}
+        onClose={() => setShowNewClaimModal(false)}
+        onSuccess={() => fetchClaims()}
+      />
 
       {/* Filters Section */}
       <div className="flex flex-wrap gap-4">

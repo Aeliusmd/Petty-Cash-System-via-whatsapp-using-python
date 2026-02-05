@@ -88,12 +88,22 @@ class Organization(BaseModel):
     
     @classmethod
     async def delete(cls, org_id: int, soft: bool = True) -> bool:
-        """Soft delete organization"""
+        """Soft delete organization and cascade to employees"""
+        # 1. Deactivate organization
         result = await db.execute("""
             UPDATE organizations SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
             WHERE id = $1
         """, org_id)
-        return result == "UPDATE 1"
+        
+        if result == "UPDATE 1":
+            # 2. Deactivate all employees in this organization to free up phone numbers
+            await db.execute("""
+                UPDATE employees SET is_active = FALSE 
+                WHERE organization_id = $1
+            """, org_id)
+            return True
+            
+        return False
     
     @classmethod
     async def get_units(cls, org_id: int) -> List[Dict[str, Any]]:

@@ -137,23 +137,15 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   }
 
   function getFileUrl(receipt: Receipt): string {
-    // Determine if file is in nested folder or flat
-    // Web uploads are in receipts/<claim_id>/filename
-    // WhatsApp uploads are in receipts/filename
+    // All receipts are stored flat in receipts/ directory
+    // We must use the filename from file_path because it corresponds to the actual file on disk (UUID)
+    // whereas receipt.file_name stores the original user-uploaded filename
+    const normalizedPath = receipt.file_path.replace(/\\/g, '/');
+    const systemFilename = normalizedPath.split('/').pop() || receipt.file_path;
     
-    // Extract filename
-    const filename = receipt.file_path.split('/').pop() || receipt.file_path;
-    
-    // Check if path contains claim_id directory
-    // Backend path for web: .../receipts/101/abc.jpg
-    // Backend path for whatsapp: .../receipts/abc.jpg
-    const isNested = receipt.file_path.includes(`/${receipt.claim_id}/`) || receipt.file_path.includes(`\\${receipt.claim_id}\\`);
-    
-    if (isNested) {
-        return `${API_BASE_URL}/api/receipts/${receipt.claim_id}/${filename}`;
-    } else {
-        return `${API_BASE_URL}/api/receipts/${filename}`;
-    }
+    // Use systemFilename for the URL, fallback to file_name only if extraction fails
+    const filename = systemFilename || receipt.file_name;
+    return `${API_BASE_URL}/api/receipts/${filename}`;
   }
 
   function isImageFile(receipt: Receipt): boolean {

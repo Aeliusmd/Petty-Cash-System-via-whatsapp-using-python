@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import NewClaimModal from '@/components/NewClaimModal';
 import ClaimDetailsModal from '@/components/ClaimDetailsModal';
+import { authenticatedFetch } from '@/utils/api';
 
 interface Claim {
   id: number;
@@ -107,10 +108,7 @@ function MyClaimsContent() {
       params.set('limit', itemsPerPage.toString());
       params.set('offset', ((currentPage - 1) * itemsPerPage).toString());
       
-      const token = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/claims?${params}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/claims?${params}`);
       if (!res.ok) throw new Error('Failed to fetch claims');
       const data = await res.json();
       setClaims(data.claims || []);

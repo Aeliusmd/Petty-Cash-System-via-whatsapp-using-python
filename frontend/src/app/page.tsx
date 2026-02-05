@@ -5,36 +5,14 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
+// API_BASE_URL is handled in api.ts
 
-interface DashboardStats {
-  overview: {
-    total_claims: number;
-    pending_claims: number;
-    approved_claims: number;
-    rejected_claims: number;
-    total_approved_amount: number;
-    pending_amount: number;
-  };
-  categories: {
-    category: number;
-    count: number;
-    total_amount: number;
-  }[];
-  recent_claims: {
-    claim_number: string;
-    created_at: string;
-    employee_name: string;
-    category_name: string;
-    final_amount: number;
-    status_code: string;
-  }[];
-}
+import { fetchStats, Stats } from '@/utils/api';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading, hasAnyPermission } = useAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
 
   // Permission-based access check
@@ -70,19 +48,13 @@ export default function DashboardPage() {
     }
 
     // If we're here, we are authenticated and authorized to view dashboard
-    fetchStats();
+    loadStats();
   }, [isAuthenticated, canViewDashboard, isLoading, router]);
 
-  async function fetchStats() {
+  async function loadStats() {
     try {
-      const token = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/stats`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setStats(data);
-      }
+      const data = await fetchStats();
+      setStats(data);
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     } finally {

@@ -40,23 +40,30 @@ export default function OrganizationsPage() {
 
   const fetchUnits = async () => {
     try {
-      const authToken = localStorage.getItem('auth_token');
-      console.log('🔑 Fetching organizations with token:', authToken ? authToken.substring(0, 10) + '...' : 'null');
+      console.log('🔑 Fetching organizations...');
       
+      const authToken = localStorage.getItem('auth_token');
       const res = await fetch('http://localhost:4101/api/organizations', {
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
       
       console.log(`📡 API Status: ${res.status} ${res.statusText}`);
       
+      // If 401, clear auth and redirect (will be handled by page reload)
+      if (res.status === 401) {
+        console.error('❌ 401 Unauthorized - Token invalid or expired');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('auth_user');
+        window.location.href = '/login';
+        return;
+      }
+      
       const text = await res.text();
       console.log('📦 Raw API Response:', text);
       
       if (!res.ok) {
         console.error('❌ API Error:', res.status, text);
-        if (res.status === 401) {
-            console.error('Unauthorized - Token might be invalid');
-        }
         setUnits([]);
         return;
       }

@@ -36,7 +36,7 @@ const groupPermissionsByCategory = (permissions: Permission[]) => {
 
 export default function RolesPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, hasPermission } = useAuth();
+  const { isAuthenticated, isLoading, hasPermission, token } = useAuth();
   
   const [roles, setRoles] = useState<Role[]>([]);
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
@@ -74,12 +74,12 @@ export default function RolesPage() {
 
     fetchRoles();
     fetchPermissions();
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, router, token]);
 
   async function fetchRoles() {
     try {
       setLoading(true);
-      const token = localStorage.getItem('auth_token');
+      // const token = sessionStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/api/roles`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -95,7 +95,7 @@ export default function RolesPage() {
 
   async function fetchPermissions() {
     try {
-      const token = localStorage.getItem('auth_token');
+      // const token = sessionStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/api/roles/permissions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -149,7 +149,7 @@ export default function RolesPage() {
     setProcessing(true);
 
     try {
-      const token = localStorage.getItem('auth_token');
+      // const token = sessionStorage.getItem('auth_token');
       const payload = {
         ...formData,
         permission_codes: selectedPermissions,
@@ -192,7 +192,7 @@ export default function RolesPage() {
     if (!confirm(`Are you sure you want to delete the role "${role.name}"?`)) return;
 
     try {
-      const token = localStorage.getItem('auth_token');
+      // const token = sessionStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/api/roles/${role.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }

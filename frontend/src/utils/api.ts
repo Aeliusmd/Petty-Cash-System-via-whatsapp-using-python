@@ -1,6 +1,68 @@
 // API configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
+/**
+ * Makes an authenticated fetch request and handles 401 errors automatically
+ * @param url - The URL to fetch
+ * @param options - Fetch options (headers will be merged with auth header)
+ * @returns Response object
+ */
+export async function authenticatedFetch(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const token = localStorage.getItem('auth_token');
+  
+  const headers = {
+    ...options.headers,
+    'Authorization': `Bearer ${token}`,
+  };
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  // If we get a 401, the token is invalid - clear auth and redirect to login
+  if (response.status === 401) {
+    console.error('❌ 401 Unauthorized - Clearing auth and redirecting to login');
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('auth_user');
+    
+    // Redirect to login page
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+  }
+
+  return response;
+}
+
+/**
+ * Helper to get the auth token from localStorage
+ */
+export function getAuthToken(): string | null {
+  return localStorage.getItem('auth_token');
+}
+
+/**
+ * Helper to check if user is authenticated
+ */
+export function isAuthenticated(): boolean {
+  const token = getAuthToken();
+  if (!token) return false;
+
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const exp = payload.exp * 1000;
+    return Date.now() < exp;
+  } catch {
+    return false;
+  }
+}
+
+
 export interface Claim {
   id: number;
   claim_number: string;

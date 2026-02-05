@@ -54,16 +54,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const now = Date.now();
       const timeUntilExpiry = exp - now;
       
-      // Refresh 5 minutes before expiry
-      const refreshTime = timeUntilExpiry - (5 * 60 * 1000);
+      // Refresh 5 minutes before expiry, but handle short-lived tokens
+      // If token has > 5 mins left, refresh at (expiry - 5min)
+      // If token has 1-5 mins left, refresh at (expiry - 30sec)
+      // If token has < 1 min left, refresh immediately
       
-      if (refreshTime > 0) {
-        console.log(`🔄 Scheduling token refresh in ${Math.round(refreshTime/1000/60)} minutes`);
-        setTimeout(() => refreshSession(), refreshTime);
+      let refreshDelay = timeUntilExpiry - (5 * 60 * 1000);
+      
+      if (refreshDelay <= 0) {
+          if (timeUntilExpiry > 60 * 1000) {
+              // Token valid for more than 1 min but less than 5 mins
+              // Refresh 30 seconds before expiry
+              console.log('⚠️ Short-lived token detected, reducing buffer');
+              refreshDelay = timeUntilExpiry - (30 * 1000);
+          } else {
+              // Less than 1 minute left, refresh now
+              refreshDelay = 0;
+          }
+      }
+      
+      if (refreshDelay > 0) {
+        console.log(`🔄 Scheduling token refresh in ${Math.round(refreshDelay/1000/60*10)/10} minutes (Expiry in ${Math.round(timeUntilExpiry/1000/60*10)/10} mins)`);
+        // Clear any existing timer if we stored it (context doesn't store tracking ID currently, but usually safe in React if component doesn't unmount frequently)
+        setTimeout(() => refreshSession(), refreshDelay);
       } else {
         // Already expired or close to, refresh immediately
+        console.log('⏰ Token expiring immediately, refreshing now');
         refreshSession();
       }
+
     } catch (e) {
       console.error('Error scheduling refresh:', e);
     }
@@ -104,16 +123,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const storedUser = localStorage.getItem('auth_user');
       
       if (storedToken && storedUser) {
-        setToken(storedToken);
-        setRefreshToken(storedRefreshToken);
-        setUser(JSON.parse(storedUser));
-        
-        // Check if token is expired or about to expire
+        // Check if token is expired BEFORE setting state
         try {
             const payload = JSON.parse(atob(storedToken.split('.')[1]));
             const exp = payload.exp * 1000;
-            if (Date.now() > exp - (5 * 60 * 1000)) {
-                // Token expired or expiring soon, try refresh if we have a refresh token
+            const now = Date.now();
+            
+            // If token is already expired (not just expiring soon)
+            if (now > exp) {
+                console.log('🔴 Token expired, attempting refresh or logout');
+                // Token expired, try refresh if we have a refresh token
+                if (storedRefreshToken) {
+                    await refreshSession();
+                } else {
+                    // No refresh token, clear everything and redirect to login
+                    console.log('❌ No refresh token, clearing auth state');
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('refresh_token');
+                    localStorage.removeItem('auth_user');
+                }
+                setIsLoading(false);
+                return;
+            }
+            
+            // Token is valid, set the state
+            setToken(storedToken);
+            setRefreshToken(storedRefreshToken);
+            setUser(JSON.parse(storedUser));
+            
+            // If token is expiring soon (within 5 minutes), refresh it
+            if (now > exp - (5 * 60 * 1000)) {
+                console.log('⚠️ Token expiring soon, refreshing...');
                 if (storedRefreshToken) {
                     await refreshSession();
                     setIsLoading(false);
@@ -121,7 +161,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
             }
         } catch (e) {
-            console.error("Error checking token expiry", e);
+            console.error("❌ Error checking token expiry, clearing auth state:", e);
+            // If we can't parse the token, it's invalid - clear everything
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('auth_user');
+            setIsLoading(false);
+            return;
         }
         
         // Then fetch fresh user data with latest permissions
@@ -140,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             scheduleRefresh(storedToken);
           } else if (res.status === 401) {
              // Token invalid, try refresh logic
+             console.log('❌ 401 from /api/auth/me, attempting refresh');
              if (storedRefreshToken) {
                  await refreshSession();
              } else {
@@ -154,7 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     
     loadAuthState();
-  }, [scheduleRefresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   const login = (accessToken: string, newRefreshToken: string, userData: User) => {
     setToken(accessToken);

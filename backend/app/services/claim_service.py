@@ -334,7 +334,7 @@ class ClaimService(BaseService):
             # 4. Save to database
             receipt_record = await self.add_receipt(
                 claim_id=claim_id,
-                file_path=str(file_path),
+                file_path=saved_filename,  # Store only filename, not full path
                 file_name=filename,
                 file_type=content_type,
                 file_size=len(content),

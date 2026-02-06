@@ -137,15 +137,9 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   }
 
   function getFileUrl(receipt: Receipt): string {
-    // All receipts are stored flat in receipts/ directory
-    // We must use the filename from file_path because it corresponds to the actual file on disk (UUID)
-    // whereas receipt.file_name stores the original user-uploaded filename
-    const normalizedPath = receipt.file_path.replace(/\\/g, '/');
-    const systemFilename = normalizedPath.split('/').pop() || receipt.file_path;
-    
-    // Use systemFilename for the URL, fallback to file_name only if extraction fails
-    const filename = systemFilename || receipt.file_name;
-    return `${API_BASE_URL}/api/receipts/${filename}`;
+    // file_path now stores only the filename (e.g., "uuid.jpeg")
+    // No need for complex path extraction
+    return `${API_BASE_URL}/api/receipts/${receipt.file_path}`;
   }
 
   function isImageFile(receipt: Receipt): boolean {

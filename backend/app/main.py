@@ -133,28 +133,8 @@ app.include_router(webhook_router)
 # STATIC FILES (Receipts)
 # ============================================================
 
-# Ensure receipts directory exists
-# Helper to get backend root directory (parent of app)
-# Try explicit path first (Docker container standard)
-possible_paths = [
-    Path("/app/backend/receipts"),
-    Path(__file__).resolve().parent.parent / "receipts",
-    Path("receipts").resolve()
-]
-
-receipts_dir = None
-for path in possible_paths:
-    print(f"🔍 DEBUG: Checking receipts path: {path}")
-    if path.exists():
-        receipts_dir = path
-        print(f"✅ DEBUG: Found receipts dir at {path} with {len(list(path.glob('*')))} files")
-        break
-
-if not receipts_dir:
-    # Fallback to creating one relative to file
-    receipts_dir = possible_paths[1]
-    print(f"⚠️ DEBUG: No receipts dir found! Creating at {receipts_dir}")
-    receipts_dir.mkdir(parents=True, exist_ok=True)
+# Import shared receipts directory configuration
+from app.config_paths import RECEIPTS_DIR as receipts_dir
 
 app.mount("/api/receipts", StaticFiles(directory=str(receipts_dir)), name="receipts")
 

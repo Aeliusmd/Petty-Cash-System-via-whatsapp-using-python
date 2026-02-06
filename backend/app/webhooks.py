@@ -180,10 +180,9 @@ async def handle_message_event(payload: dict):
             if image_bytes:
                 # Save to disk
                 try:
-                    # Determine paths
-                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    receipts_dir = os.path.join(base_dir, "receipts")
-                    os.makedirs(receipts_dir, exist_ok=True)
+                    # Use shared receipts directory from config
+                    from app.config_paths import RECEIPTS_DIR
+                    receipts_dir = str(RECEIPTS_DIR)
                     
                     # Generate filename
                     ext = mimetype.split('/')[-1] or 'jpg'

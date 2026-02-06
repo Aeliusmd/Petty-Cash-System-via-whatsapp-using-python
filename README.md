@@ -184,6 +184,7 @@ docker compose -f docker-compose.waha-only.yaml up
 ```powershell
 conda activate petty_cash
 python run.py
+ngrok http 4101
 ```
 
 **Terminal 3 - Frontend (Local npm):**

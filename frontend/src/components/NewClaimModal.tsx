@@ -37,6 +37,7 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
   const [description, setDescription] = useState<string>('');
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -70,11 +71,45 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files ? Array.from(e.target.files) : [];
+    addFiles(files);
+  }
+
+  function addFiles(files: File[]) {
     if (files.length > 0) {
       setReceiptFiles(prev => [...prev, ...files]);
       const newUrls = files.map(file => file.type.startsWith('image/') ? URL.createObjectURL(file) : '');
       setPreviewUrls(prev => [...prev, ...newUrls]);
     }
+  }
+
+  function handleDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    // Filter for images and PDFs only
+    const validFiles = files.filter(file => 
+      file.type.startsWith('image/') || file.type === 'application/pdf'
+    );
+    addFiles(validFiles);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -156,9 +191,19 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
             <label className="block text-sm font-medium text-gray-700 mb-2">
                 Receipt Images <span className="text-red-500">*</span>
             </label>
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-indigo-400 transition-colors">
-              {receiptFiles.length > 0 ? (
-                <div className="flex flex-wrap gap-4 justify-center">
+            <div 
+              className={`border-2 border-dashed rounded-xl p-4 text-center transition-all ${
+                isDragging 
+                  ? 'border-indigo-500 bg-indigo-50' 
+                  : 'border-gray-300 hover:border-indigo-400'
+              }`}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {receiptFiles.length > 0 && (
+                <div className="flex flex-wrap gap-4 justify-center mb-4">
                   {receiptFiles.map((file, idx) => (
                     <div key={idx} className="relative flex flex-col items-center">
                       {previewUrls[idx] && file.type.startsWith('image/') ? (
@@ -181,20 +226,24 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
                     </div>
                   ))}
                 </div>
-              ) : (
-                <label className="cursor-pointer">
-                  <div className="text-4xl mb-2">📸</div>
-                  <p className="text-gray-500">Click to upload receipts</p>
-                  <p className="text-gray-400 text-xs mt-1">JPG, PNG or PDF up to 5MB each</p>
-                  <input
-                    type="file"
-                    accept="image/*,.pdf"
-                    multiple
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                </label>
               )}
+              
+              <label className="cursor-pointer block">
+                <div className="text-4xl mb-2">📸</div>
+                <p className="text-gray-500 font-medium">
+                  {receiptFiles.length > 0 ? 'Add More Files' : 'Drag & drop files here'}
+                </p>
+                <p className="text-gray-400 text-xs mt-1">
+                  or click to browse • JPG, PNG or PDF up to 5MB each
+                </p>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  multiple
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
 

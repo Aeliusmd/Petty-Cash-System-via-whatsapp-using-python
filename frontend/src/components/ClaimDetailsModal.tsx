@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { authenticatedFetch } from '@/utils/api';
 import Image from 'next/image';
 
 interface Receipt {
@@ -121,10 +122,8 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   async function fetchReceipts() {
     setLoading(true);
     try {
-      const token = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/claims/${claim.id}/receipts`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      // Use authenticatedFetch to include ngrok-skip-browser-warning header
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/${claim.id}/receipts`);
       if (res.ok) {
         const data = await res.json();
         setReceipts(data.receipts || []);

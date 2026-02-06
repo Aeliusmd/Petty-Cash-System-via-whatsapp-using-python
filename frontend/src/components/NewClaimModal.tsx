@@ -47,12 +47,12 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
 
   async function fetchDropdownData() {
     try {
-      const token = localStorage.getItem('auth_token');
-      const headers = { 'Authorization': `Bearer ${token}` };
-
+      // Use authenticatedFetch to include ngrok bypass header
+      const { authenticatedFetch } = await import('@/utils/api');
+      
       const [categoriesRes, locationsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/categories`, { headers }),
-        fetch(`${API_BASE_URL}/api/locations`, { headers })
+        authenticatedFetch(`${API_BASE_URL}/api/categories`),
+        authenticatedFetch(`${API_BASE_URL}/api/locations`)
       ]);
 
       if (categoriesRes.ok) {
@@ -124,7 +124,7 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
     setLoading(true);
 
     try {
-      const token = localStorage.getItem('auth_token');
+      const { authenticatedFetch } = await import('@/utils/api');
       const formData = new FormData();
       receiptFiles.forEach((file) => {
         formData.append('receipts', file);
@@ -134,11 +134,8 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
       if (locationId) formData.append('location_id', locationId);
       if (description) formData.append('description', description);
 
-      const res = await fetch(`${API_BASE_URL}/api/claims`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/claims`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         body: formData
       });
 

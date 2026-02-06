@@ -75,10 +75,6 @@ async def create_unit(
         # If user is Super Admin but entered Org A, they should create in Org A?
         # data.organization_id comes from form.
         pass 
-
-    existing = await Unit.find_by_code(data.code) 
-    # Check if existing belongs to same org to call duplicate?
-    # Unit.find_by_code might need scoping.
     
     unit = await Unit.create(data.model_dump())
     return unit.to_dict() if unit else {}
@@ -94,7 +90,7 @@ async def update_unit(
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
     
-    updated = await unit.update(data.model_dump(exclude_unset=True))
+    updated = await Unit.update(unit_id, data.model_dump(exclude_unset=True))  # Call as class method
     return updated.to_dict() if updated else {}
 
 @units_router.delete("/{unit_id}")
@@ -107,7 +103,7 @@ async def delete_unit(
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
         
-    await unit.delete()
+    await Unit.delete(unit_id)  # Call as class method with unit_id
     return {"success": True}
 
 

@@ -318,11 +318,12 @@ class ClaimController(BaseController):
     async def appeal_claim(
         self,
         claim_id: int,
-        data: ClaimAppealRequest,
         request: Request,
+        notes: str = Form(...),
+        receipts: List[UploadFile] = File(None),
         auth: dict = Depends(require_permission("claims.appeal"))
     ):
-        """Appeal a rejected claim"""
+        """Appeal a rejected claim with optional additional receipts"""
         service = ClaimService(request)
         
         # Verify ownership
@@ -334,9 +335,40 @@ class ClaimController(BaseController):
             claim = await service.appeal_claim(
                 claim_id=claim_id,
                 employee_id=auth['employee_id'],
-                notes=data.notes,
+                notes=notes,
                 organization_id=auth.get('organization_id')
             )
+            
+            # Handle additional receipt uploads during appeal
+            if receipts and len(receipts) > 0:
+                # Prepare receipt data
+                receipt_files = []
+                for receipt in receipts:
+                    content = await receipt.read()
+                    receipt_files.append({
+                        'bytes': content,
+                        'filename': receipt.filename,
+                        'content_type': receipt.content_type
+                    })
+                
+                # Use shared receipt processing method
+                await service.process_and_save_receipts(
+                    claim_id=claim.id,
+                    receipt_files=receipt_files,
+                    employee_id=auth['employee_id'],
+                    organization_id=auth.get('organization_id')
+                )
+                
+                print(f"✅ Processed {len(receipts)} additional receipts for appeal on claim {claim_id}")
+            
+            # Notify manager of the appeal
+            try:
+                from app.services.notification_service import notify_manager_of_appeal
+                claim_dict = claim.to_dict()
+                await notify_manager_of_appeal(claim_dict, notes)
+            except Exception as e:
+                print(f"⚠️ Failed to notify manager of appeal: {e}")
+                
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         

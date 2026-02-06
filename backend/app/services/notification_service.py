@@ -306,8 +306,8 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         employee = await employee_model.find_by_id(claim['employee_id'])
         employee_name = employee.get('name', 'Unknown') if employee else 'Unknown'
         
-        # Get full claim details
-        full_claim = await claim_model.find_by_id(claim['id'])
+        # Use claim dict directly (it already has all the data we need)
+        full_claim = claim
         amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
         
         # Get receipts from database to show detailed breakdown

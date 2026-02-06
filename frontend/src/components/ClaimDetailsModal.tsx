@@ -88,6 +88,15 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  
+  // Appeal state
+  const [showAppealForm, setShowAppealForm] = useState(false);
+  const [appealNotes, setAppealNotes] = useState('');
+  const [appealSubmitting, setAppealSubmitting] = useState(false);
+  const [appealError, setAppealError] = useState<string | null>(null);
+  const [appealReceipts, setAppealReceipts] = useState<File[]>([]);
+  const [appealPreviewUrls, setAppealPreviewUrls] = useState<string[]>([]);
+  const [appealDragging, setAppealDragging] = useState(false);
 
   useEffect(() => {
     if (isOpen && claim) {
@@ -155,6 +164,111 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
     const fileType = receipt.file_type?.toLowerCase() || '';
     const fileName = receipt.file_name?.toLowerCase() || '';
     return fileType.includes('pdf') || fileName.endsWith('.pdf');
+  }
+
+  async function submitAppeal() {
+    if (!appealNotes.trim()) {
+      setAppealError('Please provide a reason for your appeal');
+      return;
+    }
+
+    setAppealSubmitting(true);
+    setAppealError(null);
+
+    try {
+      // Use FormData to support file uploads
+      const formData = new FormData();
+      formData.append('notes', appealNotes);
+      
+      // Append all receipt files
+      appealReceipts.forEach((file) => {
+        formData.append('receipts', file);
+      });
+
+      const res = await authenticatedFetch(
+        `${API_BASE_URL}/api/claims/${claim.id}/appeal`,
+        {
+          method: 'POST',
+          body: formData  // Send FormData instead of JSON
+        }
+      );
+
+      if (res.ok) {
+        // Refresh receipts to ensure they display after appeal
+        await fetchReceipts();
+        
+        // Close appeal form and reset state
+        setShowAppealForm(false);
+        setAppealNotes('');
+        setAppealReceipts([]);
+        setAppealPreviewUrls([]);
+        
+        // Show success message
+        alert('✅ Appeal submitted successfully! Your manager will review it.');
+        
+        // Close modal
+        onClose();
+        
+        // Reload page to refresh claim status
+        window.location.reload();
+      } else {
+        const data = await res.json();
+        setAppealError(data.detail || 'Failed to submit appeal');
+      }
+    } catch (err) {
+      setAppealError('Failed to submit appeal. Please try again.');
+      console.error('Appeal submission error:', err);
+    } finally {
+      setAppealSubmitting(false);
+    }
+  }
+
+  function handleAppealFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length > 0) {
+      setAppealReceipts(prev => [...prev, ...files]);
+      const newUrls = files.map(file => 
+        file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+      );
+      setAppealPreviewUrls(prev => [...prev, ...newUrls]);
+    }
+  }
+
+  function removeAppealReceipt(index: number) {
+    setAppealReceipts(files => files.filter((_, i) => i !== index));
+    setAppealPreviewUrls(urls => urls.filter((_, i) => i !== index));
+  }
+
+  function handleAppealDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setAppealDragging(true);
+  }
+
+  function handleAppealDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleAppealDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setAppealDragging(false);
+  }
+
+  function handleAppealDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setAppealDragging(false);
+
+    const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    if (files.length > 0) {
+      setAppealReceipts(prev => [...prev, ...files]);
+      const newUrls = files.map(file => 
+        file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+      );
+      setAppealPreviewUrls(prev => [...prev, ...newUrls]);
+    }
   }
 
   if (!isOpen) return null;
@@ -303,12 +417,22 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                 </div>
               )}
 
-              {/* Rejection Reason */}
-              {claim.status_code === 'REJECTED' && claim.rejection_reason && (
+              {/* Rejection Reason + Appeal Button */}
+              {claim.rejection_reason && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                  <h3 className="font-semibold text-red-800 mb-2 flex items-center gap-2">
-                    <span>❌</span> Rejection Reason
-                  </h3>
+                  <div className="flex items-start justify-between mb-2">
+                    <h3 className="font-semibold text-red-800 flex items-center gap-2">
+                      <span>❌</span> Rejection Reason
+                    </h3>
+                    {claim.status_code === 'REJECTED' && (
+                      <button
+                        onClick={() => setShowAppealForm(true)}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium flex items-center gap-2"
+                      >
+                        <span>🔄</span> Appeal This Decision
+                      </button>
+                    )}
+                  </div>
                   <p className="text-red-700 text-sm">{claim.rejection_reason}</p>
                 </div>
               )}
@@ -392,6 +516,147 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
           </div>
         </div>
       </div>
+
+      {/* Appeal Form Modal */}
+      {showAppealForm && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm z-50"
+            onClick={() => setShowAppealForm(false)}
+          />
+          <div className="fixed inset-0 z-[60] overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4">
+              <div 
+                className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <span>🔄</span> Appeal Rejection
+                  </h3>
+                  <button
+                    onClick={() => setShowAppealForm(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-full"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <p className="text-gray-600 text-sm mb-4">
+                  Explain why you believe this claim should be reconsidered. Your manager will review your appeal.
+                </p>
+
+                {/* Error Message */}
+                {appealError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                    {appealError}
+                  </div>
+                )}
+
+                {/* Appeal Notes Textarea */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Appeal Reason *
+                  </label>
+                  <textarea
+                    value={appealNotes}
+                    onChange={(e) => setAppealNotes(e.target.value)}
+                    placeholder="Explain why this claim should be approved..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                    rows={4}
+                    disabled={appealSubmitting}
+                  />
+                </div>
+
+                {/* Receipt Upload Section */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Additional Receipts (Optional)
+                  </label>
+                  
+                  {/* File Preview Grid */}
+                  {appealReceipts.length > 0 && (
+                    <div className="flex flex-wrap gap-3 mb-3">
+                      {appealReceipts.map((file, idx) => (
+                        <div key={idx} className="relative">
+                          {appealPreviewUrls[idx] && file.type.startsWith('image/') ? (
+                            <img 
+                              src={appealPreviewUrls[idx]} 
+                              alt={`Receipt ${idx+1}`} 
+                              className="w-20 h-20 object-cover rounded-lg border-2 border-gray-200" 
+                            />
+                          ) : (
+                            <div className="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-lg border-2 border-gray-200">
+                              <span className="text-2xl">📄</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeAppealReceipt(idx)}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 shadow-md"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* File Input */}
+                  <label className="cursor-pointer block">
+                    <div 
+                      className={`border-2 border-dashed rounded-lg p-4 transition-colors text-center ${
+                        appealDragging 
+                          ? 'border-indigo-500 bg-indigo-50' 
+                          : 'border-gray-300 hover:border-indigo-400'
+                      }`}
+                      onDragEnter={handleAppealDragEnter}
+                      onDragOver={handleAppealDragOver}
+                      onDragLeave={handleAppealDragLeave}
+                      onDrop={handleAppealDrop}
+                    >
+                      <div className="text-2xl mb-1">📎</div>
+                      <p className="text-sm text-gray-600">
+                        {appealReceipts.length > 0 ? 'Add More Files' : 'Drag & drop files here'}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">or click to browse • JPG, PNG or PDF</p>
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      multiple
+                      onChange={handleAppealFileChange}
+                      className="hidden"
+                      disabled={appealSubmitting}
+                    />
+                  </label>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowAppealForm(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                    disabled={appealSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitAppeal}
+                    disabled={appealSubmitting || !appealNotes.trim()}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {appealSubmitting ? 'Submitting...' : 'Submit Appeal'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Image Lightbox */}
       {selectedImage && (

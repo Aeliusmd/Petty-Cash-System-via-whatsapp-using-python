@@ -333,7 +333,7 @@ function ClaimsContent() {
             <button
               key={status || 'all'}
               onClick={() => { setActiveStatus(status); setCurrentPage(1); }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeStatus === status
                   ? 'bg-indigo-600 text-white'
                   : 'text-gray-900 hover:bg-gray-100'

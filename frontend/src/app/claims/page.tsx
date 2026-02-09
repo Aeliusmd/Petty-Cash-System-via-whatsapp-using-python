@@ -328,12 +328,12 @@ function ClaimsContent() {
       {/* Filters Section */}
       <div className="flex flex-wrap gap-4">
         {/* Status Filter Tabs */}
-        <div className="bg-white rounded-xl shadow-md p-2 inline-flex gap-2">
+        <div className="bg-white rounded-xl shadow-md p-2 flex overflow-x-auto w-full md:w-auto hide-scrollbar gap-2">
           {statuses.map((status) => (
             <button
               key={status || 'all'}
               onClick={() => { setActiveStatus(status); setCurrentPage(1); }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                 activeStatus === status
                   ? 'bg-indigo-600 text-white'
                   : 'text-gray-900 hover:bg-gray-100'
@@ -345,9 +345,9 @@ function ClaimsContent() {
         </div>
 
         {/* Employee Filter - Autocomplete Search */}
-        <div className="bg-white rounded-xl shadow-md p-2 relative">
+        <div className="bg-white rounded-xl shadow-md p-2 relative w-full md:w-auto">
           <div className="flex items-center gap-2">
-            <div className="relative">
+            <div className="relative w-full">
               <input
                 type="text"
                 value={employeeSearch}
@@ -361,7 +361,7 @@ function ClaimsContent() {
                 }}
                 onFocus={() => setShowSuggestions(true)}
                 placeholder="🔍 Search employee..."
-                className="px-4 py-2 rounded-lg text-sm font-medium border-0 focus:ring-2 focus:ring-indigo-500 w-64"
+                className="px-4 py-2 rounded-lg text-sm font-medium border-0 focus:ring-2 focus:ring-indigo-500 w-full md:w-64"
               />
               {selectedEmployeeId && (
                 <button
@@ -426,15 +426,15 @@ function ClaimsContent() {
           
           {/* Pagination Controls */}
           {!loading && claims.length > 0 && (
-            <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-between rounded-b-xl border border-t-0 border-gray-200 mt-[-1px]">
-              <div className="flex items-center gap-4">
+            <div className="px-6 py-4 bg-gray-50 border-t flex flex-col md:flex-row items-center justify-between rounded-b-xl border border-t-0 border-gray-200 mt-[-1px] gap-4 md:gap-0">
+              <div className="flex flex-col md:flex-row items-center gap-4 text-center md:text-left">
                 <span className="text-sm text-gray-700">
                   Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, total)} of {total} claims
                 </span>
                 <select
                   value={itemsPerPage}
                   onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                  className="px-2 py-1 border border-gray-300 rounded text-sm w-full md:w-auto"
                 >
                   <option value={5}>5 per page</option>
                   <option value={10}>10 per page</option>

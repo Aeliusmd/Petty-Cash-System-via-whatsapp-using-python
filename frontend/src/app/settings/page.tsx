@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { authenticatedFetch } from '@/utils/api';
 
 interface Unit {
   id: number;
@@ -84,67 +85,7 @@ export default function SettingsPage() {
     fetchDepartments();
   }, [hasConfigAccess, user, isLoading, router]);
 
-import { authenticatedFetch } from '@/utils/api';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
-
-export default function SettingsPage() {
-  const router = useRouter();
-  const { user, token, isLoading, hasPermission } = useAuth();
-  const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
-  const [accessDenied, setAccessDenied] = useState(false);
-
-  // Departments state
-  const [departments, setDepartments] = useState<Unit[]>([]);
-  const [loadingDepts, setLoadingDepts] = useState(true);
-  const [showDeptModal, setShowDeptModal] = useState(false);
-  const [editingDept, setEditingDept] = useState<Unit | null>(null);
-  const [deptFormData, setDeptFormData] = useState({ code: '', name: '' });
-
-  // Categories state
-  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loadingCats, setLoadingCats] = useState(false);
-  const [showCatModal, setShowCatModal] = useState(false);
-  const [editingCat, setEditingCat] = useState<Category | null>(null);
-  const [catFormData, setCatFormData] = useState({
-    code: '',
-    name: '',
-    description: '',
-    requires_receipt: false,
-    display_order: 0,
-    prompt_message: ''
-  });
-
-  // Permission-based access - allow view or manage
-  const canViewConfig = hasPermission('config.view');
-  const canManageConfig = hasPermission('config.manage');
-  const hasConfigAccess = canViewConfig || canManageConfig;
-
-  useEffect(() => {
-    console.log('Settings Page Debug:', {
-      isLoading,
-      userExists: !!user,
-      u_role: user?.role,
-      u_permissions: user?.permissions,
-      u_org_id: user?.organization_id,
-      canView: canViewConfig,
-      canManage: canManageConfig,
-      hasAccess: hasConfigAccess
-    });
-
-    if (isLoading) return;
-
-    if (!hasConfigAccess || !user?.organization_id) {
-      console.warn('Access Denied: Missing permissions or org_id');
-      setAccessDenied(true);
-      // Removed timeout redirect for debugging
-      // setTimeout(() => router.push('/'), 2000);
-      return;
-    }
-
-    fetchDepartments();
-  }, [hasConfigAccess, user, isLoading, router]);
 
   const fetchDepartments = async () => {
     try {

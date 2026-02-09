@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { authenticatedFetch } from '@/utils/api';
 
 interface AuditLog {
   id: number;
@@ -76,71 +77,7 @@ export default function AuditLogsPage() {
     }
   }, [page, filters, isAuthenticated, canViewAuditLogs]);
 
-  const fetchAuditLogs = async () => {
-    try {
-      setLoading(true);
-      if (!token) {
-        return;
-      }
 
-      const params = new URLSearchParams({
-        limit: limit.toString(),
-        offset: (page * limit).toString(),
-      });
-
-      if (filters.entity_type) params.append('entity_type', filters.entity_type);
-      if (filters.action) params.append('action', filters.action);
-      if (filters.from_date) params.append('from_date', filters.from_date);
-      if (filters.to_date) params.append('to_date', filters.to_date);
-
-import { authenticatedFetch } from '@/utils/api';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
-
-export default function AuditLogsPage() {
-  const router = useRouter();
-  const { token, isAuthenticated, hasPermission } = useAuth();
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [limit] = useState(50);
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
-  const [filters, setFilters] = useState<FilterState>({
-    entity_type: '',
-    action: '',
-    from_date: '',
-    to_date: '',
-  });
-
-  // Permission-based access
-  const canViewAuditLogs = hasPermission('audit.view');
-
-  // Check authentication and permission access
-  useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/login');
-      return;
-    }
-    if (!canViewAuditLogs) {
-      alert('Access denied. Audit view permission required.');
-      router.push('/');
-      return;
-    }
-  }, [isAuthenticated, canViewAuditLogs, router]);
-
-  useEffect(() => {
-    if (isAuthenticated && canViewAuditLogs) {
-      fetchAuditLogs();
-      
-      // Auto-refresh every 10 seconds
-      const interval = setInterval(() => {
-        fetchAuditLogs();
-      }, 10000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [page, filters, isAuthenticated, canViewAuditLogs]);
 
   const fetchAuditLogs = async () => {
     try {

@@ -84,12 +84,71 @@ export default function SettingsPage() {
     fetchDepartments();
   }, [hasConfigAccess, user, isLoading, router]);
 
+import { authenticatedFetch } from '@/utils/api';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
+
+export default function SettingsPage() {
+  const router = useRouter();
+  const { user, token, isLoading, hasPermission } = useAuth();
+  const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  // Departments state
+  const [departments, setDepartments] = useState<Unit[]>([]);
+  const [loadingDepts, setLoadingDepts] = useState(true);
+  const [showDeptModal, setShowDeptModal] = useState(false);
+  const [editingDept, setEditingDept] = useState<Unit | null>(null);
+  const [deptFormData, setDeptFormData] = useState({ code: '', name: '' });
+
+  // Categories state
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loadingCats, setLoadingCats] = useState(false);
+  const [showCatModal, setShowCatModal] = useState(false);
+  const [editingCat, setEditingCat] = useState<Category | null>(null);
+  const [catFormData, setCatFormData] = useState({
+    code: '',
+    name: '',
+    description: '',
+    requires_receipt: false,
+    display_order: 0,
+    prompt_message: ''
+  });
+
+  // Permission-based access - allow view or manage
+  const canViewConfig = hasPermission('config.view');
+  const canManageConfig = hasPermission('config.manage');
+  const hasConfigAccess = canViewConfig || canManageConfig;
+
+  useEffect(() => {
+    console.log('Settings Page Debug:', {
+      isLoading,
+      userExists: !!user,
+      u_role: user?.role,
+      u_permissions: user?.permissions,
+      u_org_id: user?.organization_id,
+      canView: canViewConfig,
+      canManage: canManageConfig,
+      hasAccess: hasConfigAccess
+    });
+
+    if (isLoading) return;
+
+    if (!hasConfigAccess || !user?.organization_id) {
+      console.warn('Access Denied: Missing permissions or org_id');
+      setAccessDenied(true);
+      // Removed timeout redirect for debugging
+      // setTimeout(() => router.push('/'), 2000);
+      return;
+    }
+
+    fetchDepartments();
+  }, [hasConfigAccess, user, isLoading, router]);
+
   const fetchDepartments = async () => {
     try {
-      const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/units?organization_id=${user?.organization_id}`, {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/units?organization_id=${user?.organization_id}`);
       const data = await res.json();
       setDepartments(data.units || []);
     } catch (error) {
@@ -103,10 +162,7 @@ export default function SettingsPage() {
   const fetchCategories = async (deptId: number) => {
     setLoadingCats(true);
     try {
-      const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/categories?unit_id=${deptId}`, {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/categories?unit_id=${deptId}`);
       const data = await res.json();
       setCategories(data.categories || []);
     } catch (error) {
@@ -120,7 +176,6 @@ export default function SettingsPage() {
   const handleDeptSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const authToken = localStorage.getItem('auth_token');
       const url = editingDept
         ? `${API_BASE_URL}/api/units/${editingDept.id}`
         : `${API_BASE_URL}/api/units`;
@@ -130,10 +185,9 @@ export default function SettingsPage() {
         organization_id: user?.organization_id
       };
 
-      const res = await fetch(url, {
+      const res = await authenticatedFetch(url, {
         method: editingDept ? 'PUT' : 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
@@ -158,10 +212,8 @@ export default function SettingsPage() {
     if (!confirm('Are you sure you want to delete this department?')) return;
 
     try {
-      const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/units/${id}`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/units/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${authToken}` }
       });
 
       if (res.ok) {
@@ -181,7 +233,6 @@ export default function SettingsPage() {
     if (!selectedDeptId) return;
 
     try {
-      const authToken = localStorage.getItem('auth_token');
       const url = editingCat
         ? `${API_BASE_URL}/api/categories/${editingCat.id}`
         : `${API_BASE_URL}/api/categories`;
@@ -191,10 +242,9 @@ export default function SettingsPage() {
         unit_id: selectedDeptId
       };
 
-      const res = await fetch(url, {
+      const res = await authenticatedFetch(url, {
         method: editingCat ? 'PUT' : 'POST',
         headers: {
-          'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
@@ -226,10 +276,8 @@ export default function SettingsPage() {
     if (!confirm('Are you sure you want to delete this category?')) return;
 
     try {
-      const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/api/categories/${id}`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/categories/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${authToken}` }
       });
 
       if (res.ok && selectedDeptId) {

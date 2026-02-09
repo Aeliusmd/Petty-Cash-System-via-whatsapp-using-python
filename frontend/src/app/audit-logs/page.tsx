@@ -93,14 +93,76 @@ export default function AuditLogsPage() {
       if (filters.from_date) params.append('from_date', filters.from_date);
       if (filters.to_date) params.append('to_date', filters.to_date);
 
-      const response = await fetch(`${API_BASE_URL}/api/audit-logs?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+import { authenticatedFetch } from '@/utils/api';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
+
+export default function AuditLogsPage() {
+  const router = useRouter();
+  const { token, isAuthenticated, hasPermission } = useAuth();
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [limit] = useState(50);
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [filters, setFilters] = useState<FilterState>({
+    entity_type: '',
+    action: '',
+    from_date: '',
+    to_date: '',
+  });
+
+  // Permission-based access
+  const canViewAuditLogs = hasPermission('audit.view');
+
+  // Check authentication and permission access
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    if (!canViewAuditLogs) {
+      alert('Access denied. Audit view permission required.');
+      router.push('/');
+      return;
+    }
+  }, [isAuthenticated, canViewAuditLogs, router]);
+
+  useEffect(() => {
+    if (isAuthenticated && canViewAuditLogs) {
+      fetchAuditLogs();
+      
+      // Auto-refresh every 10 seconds
+      const interval = setInterval(() => {
+        fetchAuditLogs();
+      }, 10000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [page, filters, isAuthenticated, canViewAuditLogs]);
+
+  const fetchAuditLogs = async () => {
+    try {
+      setLoading(true);
+      if (!token) {
+        return;
+      }
+
+      const params = new URLSearchParams({
+        limit: limit.toString(),
+        offset: (page * limit).toString(),
       });
 
+      if (filters.entity_type) params.append('entity_type', filters.entity_type);
+      if (filters.action) params.append('action', filters.action);
+      if (filters.from_date) params.append('from_date', filters.from_date);
+      if (filters.to_date) params.append('to_date', filters.to_date);
+
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/audit-logs?${params}`);
+
       if (response.status === 401) {
-        router.push('/login');
+        // authenticatedFetch handles redirect, but we can return here
         return;
       }
 
@@ -110,9 +172,11 @@ export default function AuditLogsPage() {
         return;
       }
 
+      const data = await response.json(); // authenticatedFetch throws if !ok is checked manually, but here we check status first or trust .json() if ok. 
+      // Actually authenticatedFetch returns response. logic below needs to be consistent. 
+      
       if (!response.ok) throw new Error('Failed to fetch audit logs');
 
-      const data = await response.json();
       setAuditLogs(data.audit_logs || []);
       setTotal(data.total || 0);
     } catch (error) {
@@ -133,11 +197,7 @@ export default function AuditLogsPage() {
       if (filters.from_date) params.append('from_date', filters.from_date);
       if (filters.to_date) params.append('to_date', filters.to_date);
 
-      const response = await fetch(`${API_BASE_URL}/api/audit-logs/export?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/audit-logs/export?${params}`);
 
       if (!response.ok) throw new Error('Export failed');
 

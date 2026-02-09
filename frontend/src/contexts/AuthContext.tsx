@@ -49,10 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const scheduleRefresh = useCallback((accessToken: string) => {
     try {
       // Decode token to get expiry
-      // Decode token to get expiry - simplified parse
-      const parts = accessToken.split('.');
-      if (parts.length !== 3) return; // Invalid token, ignore
-      const payload = JSON.parse(atob(parts[1]));
+      const payload = JSON.parse(atob(accessToken.split('.')[1]));
       const exp = payload.exp * 1000; // to ms
       const now = Date.now();
       const timeUntilExpiry = exp - now;
@@ -128,19 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (storedToken && storedUser) {
         // Check if token is expired BEFORE setting state
         try {
-            // Helper to safe parse token
-            const parseToken = (t: string) => {
-                try {
-                    const parts = t.split('.');
-                    if (parts.length !== 3) throw new Error("Invalid token format");
-                    return JSON.parse(atob(parts[1]));
-                } catch (e) {
-                    console.error("Token parse error:", e);
-                    throw e;
-                }
-            };
-
-            const payload = parseToken(storedToken);
+            const payload = JSON.parse(atob(storedToken.split('.')[1]));
             const exp = payload.exp * 1000;
             const now = Date.now();
             
@@ -164,15 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Token is valid, set the state
             setToken(storedToken);
             setRefreshToken(storedRefreshToken);
-            
-            // Safe JSON parse for user
-            try {
-                setUser(JSON.parse(storedUser));
-            } catch (userError) {
-                console.error("User data corruption:", userError);
-                // If user data is corrupted but token is valid, try to fetch fresh user data
-                // We'll let the next block handle `auth/me`
-            }
+            setUser(JSON.parse(storedUser));
             
             // If token is expiring soon (within 5 minutes), refresh it
             if (now > exp - (5 * 60 * 1000)) {
@@ -184,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
             }
         } catch (e) {
-            console.error("❌ Error checking token expiry/validity, clearing auth state:", e);
+            console.error("❌ Error checking token expiry, clearing auth state:", e);
             // If we can't parse the token, it's invalid - clear everything
             localStorage.removeItem('auth_token');
             localStorage.removeItem('refresh_token');

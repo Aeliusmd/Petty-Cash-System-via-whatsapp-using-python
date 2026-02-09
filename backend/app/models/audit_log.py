@@ -9,6 +9,7 @@ from decimal import Decimal
 from datetime import datetime
 from app.models.base import BaseModel
 from app.db.database import db
+from app.utils.audit_descriptions import get_audit_description
 
 
 class AuditLog(BaseModel):
@@ -280,7 +281,7 @@ class AuditLog(BaseModel):
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert audit log to dictionary"""
-        return {
+        data = {
             'id': self.id,
             'entity_type': self.entity_type,
             'entity_id': self.entity_id,
@@ -298,6 +299,9 @@ class AuditLog(BaseModel):
             'metadata': self.metadata,
             'created_at': self.created_at
         }
+        # Add human-friendly description
+        data['description'] = get_audit_description(data)
+        return data
 
 
 # Backward compatibility - expose class methods as module functions

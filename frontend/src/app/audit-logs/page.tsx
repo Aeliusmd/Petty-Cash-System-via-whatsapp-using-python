@@ -193,28 +193,28 @@ export default function AuditLogsPage() {
   const totalPages = Math.ceil(total / limit);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Audit Logs</h1>
-            <p className="text-gray-600 mt-1">Track all system activities and changes • Auto-refreshes every 10s</p>
-          </div>
-          <div className="text-sm text-gray-500">
-            {auditLogs.length > 0 && (
-              <span className="inline-flex items-center gap-2">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-                Live
-              </span>
-            )}          </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Audit Logs</h2>
+          <p className="text-gray-900">Track all system activities and changes • Auto-refreshes every 10s</p>
         </div>
+        <div className="text-sm text-gray-500">
+          {auditLogs.length > 0 && (
+            <span className="inline-flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              Live
+            </span>
+          )}
+        </div>
+      </div>
 
-        {/* Filters */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+      {/* Filters */}
+      <div className="bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-lg font-semibold mb-4">Filters</h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
@@ -417,6 +417,5 @@ export default function AuditLogsPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }

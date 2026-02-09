@@ -29,6 +29,8 @@ interface FilterState {
   to_date: string;
 }
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
+
 export default function AuditLogsPage() {
   const router = useRouter();
   const { token, isAuthenticated, hasPermission } = useAuth();
@@ -91,7 +93,7 @@ export default function AuditLogsPage() {
       if (filters.from_date) params.append('from_date', filters.from_date);
       if (filters.to_date) params.append('to_date', filters.to_date);
 
-      const response = await fetch(`http://localhost:4101/api/audit-logs?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/api/audit-logs?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -131,7 +133,7 @@ export default function AuditLogsPage() {
       if (filters.from_date) params.append('from_date', filters.from_date);
       if (filters.to_date) params.append('to_date', filters.to_date);
 
-      const response = await fetch(`http://localhost:4101/api/audit-logs/export?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/api/audit-logs/export?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

@@ -24,6 +24,8 @@ interface Category {
   prompt_message?: string;
 }
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
+
 export default function SettingsPage() {
   const router = useRouter();
   const { user, token, isLoading, hasPermission } = useAuth();
@@ -85,7 +87,7 @@ export default function SettingsPage() {
   const fetchDepartments = async () => {
     try {
       const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`http://localhost:4101/api/units?organization_id=${user?.organization_id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/units?organization_id=${user?.organization_id}`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
       const data = await res.json();
@@ -102,7 +104,7 @@ export default function SettingsPage() {
     setLoadingCats(true);
     try {
       const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`http://localhost:4101/api/categories?unit_id=${deptId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories?unit_id=${deptId}`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
       const data = await res.json();
@@ -120,8 +122,8 @@ export default function SettingsPage() {
     try {
       const authToken = localStorage.getItem('auth_token');
       const url = editingDept
-        ? `http://localhost:4101/api/units/${editingDept.id}`
-        : 'http://localhost:4101/api/units';
+        ? `${API_BASE_URL}/api/units/${editingDept.id}`
+        : `${API_BASE_URL}/api/units`;
 
       const payload = {
         ...deptFormData,
@@ -157,7 +159,7 @@ export default function SettingsPage() {
 
     try {
       const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`http://localhost:4101/api/units/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/units/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
@@ -181,8 +183,8 @@ export default function SettingsPage() {
     try {
       const authToken = localStorage.getItem('auth_token');
       const url = editingCat
-        ? `http://localhost:4101/api/categories/${editingCat.id}`
-        : 'http://localhost:4101/api/categories';
+        ? `${API_BASE_URL}/api/categories/${editingCat.id}`
+        : `${API_BASE_URL}/api/categories`;
 
       const payload = {
         ...catFormData,
@@ -225,7 +227,7 @@ export default function SettingsPage() {
 
     try {
       const authToken = localStorage.getItem('auth_token');
-      const res = await fetch(`http://localhost:4101/api/categories/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${authToken}` }
       });
@@ -301,49 +303,88 @@ export default function SettingsPage() {
           {loadingDepts ? (
             <p>Loading...</p>
           ) : (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <table className="min-w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {departments.map((dept) => (
-                    <tr key={dept.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{dept.code}</td>
-                      <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{dept.name}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded text-xs ${dept.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                          {dept.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap space-x-2">
-                        <button
-                          onClick={() => {
-                            setEditingDept(dept);
-                            setDeptFormData({ code: dept.code, name: dept.name });
-                            setShowDeptModal(true);
-                          }}
-                          className="text-blue-600 hover:text-blue-800"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeptDelete(dept.id)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          Delete
-                        </button>
-                      </td>
+
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden md:block bg-white shadow rounded-lg overflow-hidden mb-6">
+                <table className="min-w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {departments.map((dept) => (
+                      <tr key={dept.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{dept.code}</td>
+                        <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{dept.name}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded text-xs ${dept.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {dept.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap space-x-2">
+                          <button
+                            onClick={() => {
+                              setEditingDept(dept);
+                              setDeptFormData({ code: dept.code, name: dept.name });
+                              setShowDeptModal(true);
+                            }}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeptDelete(dept.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Card View (Departments) */}
+              <div className="md:hidden space-y-4 mb-6">
+                {departments.map((dept) => (
+                  <div key={dept.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-bold text-gray-900">{dept.name}</h3>
+                        <p className="text-xs font-mono text-gray-500">{dept.code}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${dept.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {dept.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    <div className="flex justify-end gap-4 mt-3 pt-3 border-t border-gray-50">
+                      <button
+                        onClick={() => {
+                          setEditingDept(dept);
+                          setDeptFormData({ code: dept.code, name: dept.name });
+                          setShowDeptModal(true);
+                        }}
+                        className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeptDelete(dept.id)}
+                        className="text-sm text-red-600 hover:text-red-800 font-medium"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -360,7 +401,7 @@ export default function SettingsPage() {
                 setSelectedDeptId(deptId);
                 fetchCategories(deptId);
               }}
-              className="border rounded px-3 py-2 w-64"
+              className="border rounded px-3 py-2 w-full md:w-64"
             >
               <option value="">-- Select Department --</option>
               {departments.map((dept) => (
@@ -388,7 +429,7 @@ export default function SettingsPage() {
                     });
                     setShowCatModal(true);
                   }}
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm md:text-base"
                 >
                   + Add Category
                 </button>
@@ -397,27 +438,84 @@ export default function SettingsPage() {
               {loadingCats ? (
                 <p>Loading...</p>
               ) : (
-                <div className="bg-white shadow rounded-lg overflow-hidden">
-                  <table className="min-w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Receipt Required</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {categories.map((cat) => (
-                        <tr key={cat.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{cat.code}</td>
-                          <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{cat.name}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {cat.requires_receipt ? '✅ Yes' : '❌ No'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">{cat.display_order}</td>
-                          <td className="px-6 py-4 whitespace-nowrap space-x-2">
+                <>
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block bg-white shadow rounded-lg overflow-hidden">
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Receipt Required</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {categories.map((cat) => (
+                          <tr key={cat.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{cat.code}</td>
+                            <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{cat.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {cat.requires_receipt ? '✅ Yes' : '❌ No'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">{cat.display_order}</td>
+                            <td className="px-6 py-4 whitespace-nowrap space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingCat(cat);
+                                  setCatFormData({
+                                    code: cat.code,
+                                    name: cat.name,
+                                    description: cat.description || '',
+                                    requires_receipt: cat.requires_receipt,
+                                    display_order: cat.display_order,
+                                    prompt_message: cat.prompt_message || ''
+                                  });
+                                  setShowCatModal(true);
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleCatDelete(cat.id)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile Card View (Categories) */}
+                  <div className="md:hidden space-y-4">
+                    {categories.map((cat) => (
+                      <div key={cat.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-lg">{cat.name}</h3>
+                            <p className="text-xs font-mono text-gray-500">{cat.code}</p>
+                          </div>
+                          <div>
+                            {cat.requires_receipt && (
+                                <span className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full font-medium">
+                                  Receipt Req.
+                                </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="text-sm text-gray-600 mb-2">
+                           {cat.description || 'No description'}
+                        </div>
+                        
+                        <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-50">
+                          <span className="text-xs text-gray-400">Order: {cat.display_order}</span>
+                          <div className="flex gap-4">
                             <button
                               onClick={() => {
                                 setEditingCat(cat);
@@ -431,22 +529,27 @@ export default function SettingsPage() {
                                 });
                                 setShowCatModal(true);
                               }}
-                              className="text-blue-600 hover:text-blue-800"
+                              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
                             >
                               Edit
                             </button>
                             <button
                               onClick={() => handleCatDelete(cat.id)}
-                              className="text-red-600 hover:text-red-800"
+                              className="text-sm text-red-600 hover:text-red-800 font-medium"
                             >
                               Delete
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                     {categories.length === 0 && (
+                      <div className="text-center py-8 text-gray-500 bg-white rounded-xl border border-dashed border-gray-300">
+                        No categories found in this department.
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </>
           )}

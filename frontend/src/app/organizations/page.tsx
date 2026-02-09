@@ -168,27 +168,29 @@ export default function OrganizationsPage() {
               + Add Organization
             </button>
           </div>
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-          <table className="min-w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {units.map((unit) => (
-                <tr key={unit.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{unit.code}</td>
-                  <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{unit.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded text-xs ${unit.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                      {unit.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap space-x-2">
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block bg-white shadow rounded-lg overflow-hidden">
+            <table className="min-w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {units.map((unit) => (
+                  <tr key={unit.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap font-mono text-gray-700">{unit.code}</td>
+                    <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{unit.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`px-2 py-1 rounded text-xs ${unit.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {unit.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap space-x-2">
                       <button
                         onClick={() => handleEnter(unit.id)}
                         disabled={enteringUnitId === unit.id}
@@ -200,28 +202,78 @@ export default function OrganizationsPage() {
                       >
                         {enteringUnitId === unit.id ? 'Entering...' : 'Enter →'}
                       </button>
-                    <button
-                      onClick={() => {
-                        setEditingUnit(unit);
-                        setFormData({ code: unit.code, name: unit.name });
-                        setShowAddModal(true);
-                      }}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(unit.id)}
-                      className="text-red-600 hover:text-red-800"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      <button
+                        onClick={() => {
+                          setEditingUnit(unit);
+                          setFormData({ code: unit.code, name: unit.name });
+                          setShowAddModal(true);
+                        }}
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(unit.id)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4">
+            {units.map((unit) => (
+              <div key={unit.id} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg">{unit.name}</h3>
+                    <p className="text-sm font-mono text-gray-500 mt-1">{unit.code}</p>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${unit.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {unit.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+                
+                <div className="flex gap-2 mt-4 pt-4 border-t border-gray-50">
+                  <button
+                    onClick={() => handleEnter(unit.id)}
+                    disabled={enteringUnitId === unit.id}
+                    className={`flex-1 py-2 text-white rounded-lg text-sm font-bold shadow-sm ${
+                      enteringUnitId === unit.id 
+                        ? 'bg-indigo-400 cursor-not-allowed' 
+                        : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700'
+                    }`}
+                  >
+                    {enteringUnitId === unit.id ? 'Entering...' : 'Enter Organization'}
+                  </button>
+                </div>
+                
+                <div className="flex justify-end gap-4 mt-3">
+                   <button
+                    onClick={() => {
+                      setEditingUnit(unit);
+                      setFormData({ code: unit.code, name: unit.name });
+                      setShowAddModal(true);
+                    }}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-800"
+                  >
+                    Edit Details
+                  </button>
+                  <button
+                    onClick={() => handleDelete(unit.id)}
+                    className="text-sm font-medium text-red-600 hover:text-red-800"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </>
       )}
 

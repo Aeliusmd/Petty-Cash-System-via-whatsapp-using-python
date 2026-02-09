@@ -9,6 +9,7 @@ export default function Navigation() {
   const { isAuthenticated, user, logout, exitOrganization, isInOrganization, isSuperAdmin, hasPermission, hasAnyPermission } = useAuth();
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // If not authenticated, don't show navigation
   if (!isAuthenticated) return null;
@@ -27,7 +28,6 @@ export default function Navigation() {
 
   // Determine if the "Settings" parent menu should be visible
   const showSettingsMenu = canViewSettings || canViewEmployees || canManageRoles;
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Helper to close both menus
   const closeAllMenus = () => {

@@ -464,10 +464,12 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                               className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-500 transition-all"
                               onClick={() => setSelectedImage(getFileUrl(receipt))}
                             >
-                              <img
+                              <Image
                                 src={getFileUrl(receipt)}
                                 alt={receipt.file_name}
-                                className="w-full h-full object-cover"
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 768px) 50vw, 33vw"
                               />
                               {(receipt.ocr_amount || receipt.vendor) && (
                                 <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-2">
@@ -583,11 +585,14 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                       {appealReceipts.map((file, idx) => (
                         <div key={idx} className="relative">
                           {appealPreviewUrls[idx] && file.type.startsWith('image/') ? (
-                            <img 
-                              src={appealPreviewUrls[idx]} 
-                              alt={`Receipt ${idx+1}`} 
-                              className="w-20 h-20 object-cover rounded-lg border-2 border-gray-200" 
-                            />
+                            <div className="relative w-20 h-20">
+                              <Image 
+                                src={appealPreviewUrls[idx]} 
+                                alt={`Receipt ${idx+1}`} 
+                                fill
+                                className="object-cover rounded-lg border-2 border-gray-200" 
+                              />
+                            </div>
                           ) : (
                             <div className="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-lg border-2 border-gray-200">
                               <span className="text-2xl">📄</span>
@@ -673,12 +678,16 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          <img
-            src={selectedImage}
-            alt="Receipt"
-            className="max-w-full max-h-full object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <div className="relative w-full h-full max-w-4xl max-h-[90vh]">
+            <Image
+              src={selectedImage}
+              alt="Receipt"
+              fill
+              className="object-contain"
+              onClick={(e) => e.stopPropagation()}
+              sizes="100vw"
+            />
+          </div>
         </div>
       )}
     </>

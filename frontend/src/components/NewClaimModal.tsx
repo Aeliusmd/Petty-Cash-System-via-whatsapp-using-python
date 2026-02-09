@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 
 interface Category {
   id: number;
@@ -203,9 +204,16 @@ export default function NewClaimModal({ isOpen, onClose, onSuccess }: NewClaimMo
                 <div className="flex flex-wrap gap-4 justify-center mb-4">
                   {receiptFiles.map((file, idx) => (
                     <div key={idx} className="relative flex flex-col items-center">
-                      {previewUrls[idx] && file.type.startsWith('image/') ? (
-                        <img src={previewUrls[idx]} alt={`Receipt ${idx+1}`} className="max-h-32 rounded-lg mb-1" />
-                      ) : (
+                        {previewUrls[idx] && file.type.startsWith('image/') ? (
+                          <div className="relative w-full h-32 mb-1">
+                             <Image 
+                               src={previewUrls[idx]} 
+                               alt={`Receipt ${idx+1}`} 
+                               fill
+                               className="object-contain rounded-lg" 
+                             />
+                          </div>
+                        ) : (
                         <span className="text-2xl">📄</span>
                       )}
                       <span className="text-gray-600 text-xs max-w-[100px] truncate">{file.name}</span>

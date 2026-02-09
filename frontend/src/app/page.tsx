@@ -1,79 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
-
-// API_BASE_URL is handled in api.ts
-
-import { fetchStats, Stats } from '@/utils/api';
+import { useDashboard } from '@/hooks/useDashboard';
+import RecentActivityList from '@/components/RecentActivityList';
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { user, isAuthenticated, isLoading, hasAnyPermission } = useAuth();
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [loadingStats, setLoadingStats] = useState(true);
+  const { stats, loading, user, canViewDashboard, isAuthenticated } = useDashboard();
 
-  // Permission-based access check
-  const canViewDashboard = hasAnyPermission(['dashboard.view.org', 'dashboard.view.team']);
-
-  useEffect(() => {
-    // If auth is loading, do nothing yet
-    if (isLoading) return;
-
-    // Not authenticated -> Redirect to login
-    if (!isAuthenticated) {
-      router.push('/login');
-      return;
-    }
-
-    // No dashboard permission -> Redirect to appropriate page
-    if (!canViewDashboard) {
-      // Find a page they CAN access
-      const permissions = user?.permissions || [];
-      if (permissions.some(p => ['claims.read.all', 'claims.read.team', 'claims.approve'].includes(p))) {
-        router.push('/claims');
-      } else if (permissions.some(p => ['claims.read.own', 'claims.create'].includes(p))) {
-        router.push('/my-claims');
-      } else if (permissions.includes('audit.view')) {
-        router.push('/audit-logs');
-      } else if (permissions.some(p => ['config.view', 'config.manage'].includes(p))) {
-        router.push('/settings');
-      } else if (permissions.includes('employees.read.all')) {
-        router.push('/employees');
-      }
-      // If none match, stay on dashboard (will show loading or empty state)
-      return;
-    }
-
-    // If we're here, we are authenticated and authorized to view dashboard
-    loadStats();
-  }, [isAuthenticated, canViewDashboard, isLoading, router]);
-
-  async function loadStats() {
-    try {
-      const data = await fetchStats();
-      setStats(data);
-    } catch (error) {
-      console.error('Failed to fetch stats:', error);
-    } finally {
-      setLoadingStats(false);
-    }
-  }
-
-  // Show loading while checking auth
-  if (isLoading) {
+  // Show loading state
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
-
-  // Show loading while fetching stats
-  if (isAuthenticated && canViewDashboard && loadingStats) {
-     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
@@ -104,8 +40,8 @@ export default function DashboardPage() {
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 skew-x-12 transform translate-x-12"></div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Stats Grid - RAM Pattern */}
+      <div className="grid gap-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
           <div className="text-gray-500 text-sm font-medium mb-1">Total Claims</div>
           <div className="text-3xl font-bold text-gray-800">{stats.overview.total_claims}</div>
@@ -137,52 +73,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid gap-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 500px), 1fr))" }}>
         {/* Recent Activity */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-            <h3 className="font-bold text-gray-800">Recent Claims</h3>
-            <Link href="/claims" className="text-indigo-600 text-sm font-medium hover:text-indigo-800">
-              View All →
-            </Link>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-gray-500 uppercase bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3">Claim</th>
-                  <th className="px-6 py-3">Employee</th>
-                  <th className="px-6 py-3">Amount</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.recent_claims.map((claim) => (
-                  <tr key={claim.claim_number} className="bg-white border-b hover:bg-gray-50">
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {claim.claim_number}
-                      <span className="block text-xs text-gray-400 font-normal">{claim.category_name}</span>
-                    </td>
-                    <td className="px-6 py-4">{claim.employee_name}</td>
-                    <td className="px-6 py-4">LKR {(claim.final_amount || 0).toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        claim.status_code === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                        claim.status_code === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                        'bg-orange-100 text-orange-800'
-                      }`}>
-                        {claim.status_code}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-500">
-                      {new Date(claim.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="lg:col-span-2">
+          <RecentActivityList claims={stats.recent_claims} />
         </div>
 
         {/* Categories Chart */}

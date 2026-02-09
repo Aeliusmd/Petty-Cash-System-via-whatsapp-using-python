@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ClaimDetailsModal from '@/components/ClaimDetailsModal';
 import NewClaimModal from '@/components/NewClaimModal';
+import ClaimsList from '@/components/ClaimsList';
 import { useAuth } from '@/contexts/AuthContext';
 import { authenticatedFetch } from '@/utils/api';
 
@@ -211,8 +212,9 @@ function ClaimsContent() {
     }
   }
 
-  async function handleReject(claimId: number) {
-    if (!rejectReason.trim()) {
+  async function handleReject(claimId: number, reason?: string) {
+    const finalReason = reason || rejectReason;
+    if (!finalReason.trim()) {
       alert('Please enter a rejection reason');
       return;
     }
@@ -224,7 +226,7 @@ function ClaimsContent() {
         headers: { 
           'Content-Type': 'application/json' 
         },
-        body: JSON.stringify({ reason: rejectReason }),
+        body: JSON.stringify({ reason: finalReason }),
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -402,144 +404,29 @@ function ClaimsContent() {
         </div>
       )}
 
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center min-h-[200px]">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
-        </div>
-      )}
-
-      {/* Claims List */}
-      {!loading && !error && (
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
-          {claims.length === 0 ? (
-            <div className="p-8 text-center text-gray-900">
-              No claims found
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Claim #</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Employee</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Category</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Amount</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Date</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">View</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-900 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {claims.map((claim) => (
-                  <tr key={claim.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <Link href={`/claims/${claim.id}`} className="font-medium text-indigo-600 hover:text-indigo-800">
-                        {claim.claim_number}
-                      </Link>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="font-medium text-gray-800">{claim.employee_name}</p>
-                      <p className="text-sm text-gray-900">{claim.employee_code}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span>{getCategoryIcon(claim.category_code)}</span>
-                        <span>{claim.category_name}</span>
-                      </div>
-                      {claim.location_name && (
-                        <p className="text-sm text-gray-900">📍 {claim.location_name}</p>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 font-medium">
-                      {formatCurrency(claim.final_amount || claim.system_amount || claim.user_amount)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(claim.status_code)}`}>
-                        {getClaimStatusDisplay(claim)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      {formatDate(claim.claim_date || claim.created_at)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <button
-                        onClick={() => { setSelectedClaim(claim); setIsModalOpen(true); }}
-                        className="text-indigo-600 hover:text-indigo-800 font-medium text-sm flex items-center gap-1"
-                        title="View Details"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        View
-                      </button>
-                    </td>
-                    <td className="px-6 py-4">
-                      {(claim.status_code === 'PENDING' || claim.status_code === 'APPEALED') && rejectingId !== claim.id && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleApprove(claim.id)}
-                            disabled={processing === claim.id}
-                            className="px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                          >
-                            {processing === claim.id ? '...' : '✓ Approve'}
-                          </button>
-                          <button
-                            onClick={() => setRejectingId(claim.id)}
-                            disabled={processing === claim.id}
-                            className="px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
-                          >
-                            ✗ Reject
-                          </button>
-                        </div>
-                      )}
-                      {(claim.status_code === 'PENDING' || claim.status_code === 'APPEALED') && rejectingId === claim.id && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={rejectReason}
-                            onChange={(e) => setRejectReason(e.target.value)}
-                            placeholder="Reason..."
-                            className="w-32 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-red-500"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleReject(claim.id)}
-                            disabled={processing === claim.id || !rejectReason.trim()}
-                            className="px-2 py-1 bg-red-600 text-white text-xs font-medium rounded hover:bg-red-700 disabled:opacity-50"
-                          >
-                            {processing === claim.id ? '...' : 'Confirm'}
-                          </button>
-                          <button
-                            onClick={() => { setRejectingId(null); setRejectReason(''); }}
-                            className="px-2 py-1 bg-gray-200 text-gray-900 text-xs font-medium rounded hover:bg-gray-300"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      )}
-                      {claim.status_code === 'REJECTED' && claim.rejection_reason && (
-                        <p className="text-sm text-red-600">Reason: {claim.rejection_reason}</p>
-                      )}
-                      {/* Delete Button - always visible */}
-                      <button
-                        onClick={() => handleDelete(claim.id, claim.claim_number)}
-                        disabled={processing === claim.id}
-                        className="mt-2 px-2 py-1 text-xs text-red-500 hover:text-red-700 hover:underline"
-                      >
-                        🗑️ Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      {/* Claims List Component */}
+      {!error && (
+        <>
+            <ClaimsList 
+                claims={claims} 
+                loading={loading} 
+                processingId={processing}
+                onView={(claim) => { setSelectedClaim(claim); setIsModalOpen(true); }}
+                onApprove={handleApprove}
+                onReject={(id, reason) => {
+                    setRejectReason(reason); // syncing locally to pass to handleReject if needed, but handleReject reads from state. 
+                    // Wait, handleReject reads from state `rejectReason`. 
+                    // Prop onReject passes (id, reason). 
+                    // We need to update handleReject to accept reason or update state before calling.
+                    // Let's modify handleReject signature below first.
+                    handleReject(id, reason);
+                }}
+                onDelete={handleDelete}
+            />
           
           {/* Pagination Controls */}
-          {claims.length > 0 && (
-            <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
+          {!loading && claims.length > 0 && (
+            <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-between rounded-b-xl border border-t-0 border-gray-200 mt-[-1px]">
               <div className="flex items-center gap-4">
                 <span className="text-sm text-gray-700">
                   Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, total)} of {total} claims
@@ -576,7 +463,7 @@ function ClaimsContent() {
               </div>
             </div>
           )}
-        </div>
+        </>
       )}
       
       {/* Claim Details Modal */}

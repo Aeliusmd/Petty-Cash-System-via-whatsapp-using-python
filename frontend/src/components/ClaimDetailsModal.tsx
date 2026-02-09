@@ -145,9 +145,13 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   }
 
   function getFileUrl(receipt: Receipt): string {
-    // file_path now stores only the filename (e.g., "uuid.jpeg")
-    // No need for complex path extraction
-    return `${API_BASE_URL}/api/receipts/${receipt.file_path}`;
+    // file_path stores the relative path or filename
+    // Backend StaticFiles mounted at /api/uploads
+    // If file_path is "uploads/filename.jpg", we need to strip "uploads/" if backend serves root
+    // But backend mounts "uploads" dir to "/api/uploads", so we need just the filename.
+    
+    const fileName = receipt.file_path.split('/').pop() || receipt.file_path;
+    return `${API_BASE_URL}/api/uploads/${fileName}`;
   }
 
   function isImageFile(receipt: Receipt): boolean {
@@ -470,6 +474,7 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                                 fill
                                 className="object-cover"
                                 sizes="(max-width: 768px) 50vw, 33vw"
+                                unoptimized={true} // Bypass Next.js optimization to avoid private IP errors
                               />
                               {(receipt.ocr_amount || receipt.vendor) && (
                                 <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-2">

@@ -144,6 +144,25 @@ app.mount("/api/receipts", StaticFiles(directory=str(receipts_dir)), name="recei
 
 
 # ============================================================
+# STATIC FILES (Uploads)
+# ============================================================
+# Mount uploads directory to serve images
+# Handle both local (run.py from root) and Docker environments
+if Path("/app/backend/receipts").exists():
+    UPLOAD_DIR = Path("/app/backend/receipts")
+elif Path("backend/receipts").exists():
+    UPLOAD_DIR = Path("backend/receipts")
+else:
+    UPLOAD_DIR = Path("receipts") # Fallback
+
+# Ensure directory exists
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"📂 Serving static files from: {UPLOAD_DIR.resolve()}")
+app.mount("/api/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+
+# ============================================================
 # ROOT ENDPOINTS
 # ============================================================
 
@@ -158,7 +177,6 @@ async def root():
     }
 
 
-@app.get("/health")
 async def health():
     """Detailed health check"""
     db_connected = await db.check_connection() if db else False

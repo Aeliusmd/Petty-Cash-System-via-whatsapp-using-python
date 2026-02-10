@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Multi-Level Approval System Flowcharts</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true, theme: 'default', securityLevel: 'loose'});</script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 40px; max-width: 1200px; margin: 0 auto; color: #333; }
+    h1 { text-align: center; margin-bottom: 40px; color: #2c3e50; }
+    .diagram-container { margin-bottom: 60px; border: 1px solid #e0e0e0; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: white; }
+    h2 { color: #2c3e50; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; margin-top: 0; }
+    .mermaid { text-align: center; }
+    @media print { 
+      .diagram-container { page-break-inside: avoid; border: none; box-shadow: none; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Multi-Level Approval System Architecture</h1>
+  
+  <div class="diagram-container">
+    <h2>1. Architecture Overview</h2>
+    <div class="mermaid">
+    graph TD
+        User["User / WhatsApp"] -->|"Submit Claim"| Backend
+        Backend -->|"1. Resolve Policy"| PolicyEngine["Policy Engine"]
+        PolicyEngine -->|"2. Get Policy Steps"| DB[("Database")]
+        Backend -->|"3. Create Tasks"| DB
+        
+        subgraph "Database Tables"
+            Claims["Claims Table"]
+            Policies["Approval Policies"]
+            Steps["Policy Steps"]
+            Tasks["Approval Tasks"]
+        end
+        
+        Claims --> Tasks
+        Policies --> Steps
+    </div>
+  </div>
+
+  <div class="diagram-container">
+    <h2>2. Claim Submission Flow</h2>
+    <div class="mermaid">
+    sequenceDiagram
+        participant User
+        participant API
+        participant Resolver
+        participant DB
+        
+        User->>API: Submit Claim (Amount, Category)
+        API->>Resolver: Resolve Policy(User, Amount)
+        Resolver->>DB: Fetch Active Policies
+        DB-->>Resolver: Return Policy Rules
+        Resolver->>Resolver: Match Policy ("Std 3-Level")
+        Resolver->>DB: Fetch Policy Steps
+        DB-->>Resolver: Steps - Supervisor, Finance, Director
+        
+        loop For Each Step
+            Resolver->>Resolver: Resolve Assignee
+            Resolver->>DB: Insert into claim_approval_tasks
+        end
+        
+        API->>DB: Set Claim Status = PENDING
+        API->>User: "Claim Submitted! Waiting for Supervisor."
+    </div>
+  </div>
+
+  <div class="diagram-container">
+    <h2>3. Approval Action Flow</h2>
+    <div class="mermaid">
+    stateDiagram-v2
+        [*] --> PendingStep1
+        
+        PendingStep1 --> ApprovedStep1: Manager Approves
+        ApprovedStep1 --> PendingStep2: System Activates Next Step
+        
+        PendingStep2 --> ApprovedStep2: Finance Approves
+        ApprovedStep2 --> PendingStep3: System Activates Next Step
+        
+        PendingStep3 --> ApprovedStep3: Director Approves
+        ApprovedStep3 --> Paid: Final Approval -> Auto Payment
+        
+        PendingStep1 --> Rejected: Valid Reason
+        PendingStep2 --> Rejected: Valid Reason
+        PendingStep3 --> Rejected: Valid Reason
+        
+        Rejected --> [*]
+        Paid --> [*]
+    </div>
+  </div>
+
+  <div class="diagram-container">
+    <h2>4. Entity Relationship Diagram (ERD)</h2>
+    <div class="mermaid">
+    erDiagram
+        EMPLOYEES ||--o{ CLAIMS : files
+        CLAIMS ||--|{ CLAIM_APPROVAL_TASKS : has
+        APPROVAL_POLICIES ||--|{ APPROVAL_POLICY_STEPS : defines
+        APPROVAL_POLICIES ||--o{ CLAIMS : governs
+        
+        EMPLOYEES {
+            int id
+            int manager_id
+            string role
+            int grade_id
+        }
+        
+        CLAIMS {
+            int id
+            string status
+            int current_step_order
+        }
+        
+        CLAIM_APPROVAL_TASKS {
+            int id
+            int claim_id
+            int step_order
+            int assignee_id
+            string status
+            string comments
+        }
+        
+        APPROVAL_POLICY_STEPS {
+            int id
+            int policy_id
+            string role_type
+            string condition
+        }
+    </div>
+  </div>
+
+</body>
+</html>

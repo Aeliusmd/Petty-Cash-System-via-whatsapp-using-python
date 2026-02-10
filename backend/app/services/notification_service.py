@@ -12,6 +12,8 @@ from app.models import claim as claim_model
 
 def format_currency(amount: float) -> str:
     """Format amount as currency string"""
+    if amount is None:
+        return "Rs. 0"
     return f"Rs.{amount:,.0f}"
 
 
@@ -38,12 +40,43 @@ async def notify_staff_of_approval(claim: dict) -> bool:
         full_claim = await claim_model.find_by_id(claim['id'])
         
         amount = full_claim.get('final_amount') or full_claim.get('system_amount') or 0
+        user_amount = full_claim.get('user_amount') or 0
+        
+        # Get receipts to show breakdown
+        receipts = await claim_model.get_receipts(claim['id'])
+        
+        # Build receipt section
+        receipt_section = ""
+        if receipts and len(receipts) > 0:
+            receipt_section = f"\n\n📎 *Receipts ({len(receipts)}):*"
+            total_from_receipts = 0
+            for i, receipt in enumerate(receipts, 1):
+                receipt_amount = receipt.get('ocr_amount') or 0
+                vendor = receipt.get('vendor') or 'Unknown'
+                try:
+                    amount_display = float(receipt_amount) if receipt_amount is not None else 0.0
+                except (ValueError, TypeError):
+                    amount_display = 0.0
+                receipt_section += f"\n  {i}. Rs. {amount_display:,.0f} - {vendor}"
+                total_from_receipts += amount_display
+            
+            if total_from_receipts > 0:
+                receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
+                
+                # Show difference if exists
+                if user_amount > 0:
+                    diff = abs(total_from_receipts - float(user_amount))
+                    diff_pct = (diff / float(user_amount)) * 100 if user_amount > 0 else 0
+                    
+                    if diff_pct > 5:  # Show if difference > 5%
+                        receipt_section += f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
         
         message = f"""✅ *Claim Approved!*
 
 📋 Claim #: *{full_claim['claim_number']}*
 📁 Category: {full_claim.get('category_name', 'N/A')}
-💵 Amount: {format_currency(amount)}
+💵 Your Amount: {format_currency(user_amount)}
+💰 Approved Amount: {format_currency(amount)}{receipt_section}
 
 Your claim has been approved and will be processed for payment.
 
@@ -81,13 +114,42 @@ async def notify_staff_of_rejection(claim: dict, reason: str) -> bool:
         # Get full claim details
         full_claim = await claim_model.find_by_id(claim['id'])
         
-        amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
+        user_amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
+        
+        # Get receipts to show breakdown
+        receipts = await claim_model.get_receipts(claim['id'])
+        
+        # Build receipt section
+        receipt_section = ""
+        if receipts and len(receipts) > 0:
+            receipt_section = f"\n\n📎 *Receipts ({len(receipts)}):*"
+            total_from_receipts = 0
+            for i, receipt in enumerate(receipts, 1):
+                receipt_amount = receipt.get('ocr_amount') or 0
+                vendor = receipt.get('vendor') or 'Unknown'
+                try:
+                    amount_display = float(receipt_amount) if receipt_amount is not None else 0.0
+                except (ValueError, TypeError):
+                    amount_display = 0.0
+                receipt_section += f"\n  {i}. Rs. {amount_display:,.0f} - {vendor}"
+                total_from_receipts += amount_display
+            
+            if total_from_receipts > 0:
+                receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
+                
+                # Show difference if exists
+                if user_amount > 0:
+                    diff = abs(total_from_receipts - float(user_amount))
+                    diff_pct = (diff / float(user_amount)) * 100 if user_amount > 0 else 0
+                    
+                    if diff_pct > 5:  # Show if difference > 5%
+                        receipt_section += f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
         
         message = f"""❌ *Claim Rejected*
 
 📋 Claim #: *{full_claim['claim_number']}*
 📁 Category: {full_claim.get('category_name', 'N/A')}
-💵 Amount: {format_currency(amount)}
+💵 Amount: {format_currency(user_amount)}{receipt_section}
 
 📝 *Reason:* {reason}
 
@@ -306,8 +368,12 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         employee = await employee_model.find_by_id(claim['employee_id'])
         employee_name = employee.get('name', 'Unknown') if employee else 'Unknown'
         
-        # Use claim dict directly (it already has all the data we need)
-        full_claim = claim
+        # Fetch full claim with JOINs to get category_name, location_name, etc.
+        full_claim = await claim_model.find_by_id(claim['id'])
+        if not full_claim:
+            print(f"❌ Could not fetch full claim details for claim {claim['id']}")
+            return False
+            
         amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
         
         # Get receipts from database to show detailed breakdown
@@ -323,7 +389,7 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
             receipt_section = f"\n\n📎 *Receipts ({len(receipts_from_db)}):*"
             total_from_receipts = 0
             for i, receipt in enumerate(receipts_from_db, 1):
-                receipt_amount = receipt.get('ocr_amount', 0)
+                receipt_amount = receipt.get('ocr_amount') or 0
                 vendor = receipt.get('vendor') or 'Unknown'
                 
                 # Get link
@@ -334,34 +400,48 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
                 else:
                     receipt_link = "N/A"
                 
-                receipt_section += f"\n  {i}. Rs. {receipt_amount:,.0f} - {vendor}"
+                # Ensure amount is a number for formatting
+                try:
+                    amount_display = float(receipt_amount) if receipt_amount is not None else 0.0
+                except (ValueError, TypeError):
+                    amount_display = 0.0
+                    
+                receipt_section += f"\n  {i}. Rs. {amount_display:,.0f} - {vendor}"
                 receipt_section += f"\n     🔗 {receipt_link}"
                 
-                total_from_receipts += receipt_amount
+                total_from_receipts += (float(receipt_amount) if receipt_amount is not None else 0)
             
             if total_from_receipts > 0:
-                receipt_section += f"\n\n🧮 *Total from receipts:* Rs. {total_from_receipts:,.0f}"
+                # Use different label for advance claims (quotations vs receipts)
+                is_advance = full_claim.get('claim_type') == 'advance'
+                total_label = "Total from quotations:" if is_advance else "Total from receipts:"
+                receipt_section += f"\n\n🧮 *{total_label}* Rs. {total_from_receipts:,.0f}"
                 
-                # Validation: Check if receipts match claim amount
-                # Validation: Check if receipts match claim amount
+                # Show difference between claimed amount and total from receipts/quotations
                 if amount > 0:
                     # Convert both to float to ensure compatibility (Decimal vs Float issues)
                     amount_float = float(amount)
                     total_float = float(total_from_receipts)
                     
                     diff = abs(total_float - amount_float)
-                    diff_pct = (diff / amount_float) * 100
                     
-                    if diff_pct > 5:  # Alert if difference is > 5%
+                    # Always show difference if it exists
+                    if diff > 0:
+                        diff_pct = (diff / amount_float) * 100
                         receipt_section += f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
         else:
             receipt_section = "\n\n🧾 Receipt: Not provided"
+        
+        # Determine claim type label
+        is_advance = full_claim.get('claim_type') == 'advance'
+        claim_type_label = "💼 Type: Before Pay (Advance)" if is_advance else "💼 Type: After Pay (Reimbursement)"
         
         # Build the notification message
         message = f"""🔔 *New Claim Submitted*
 
 📋 Claim #: *{full_claim['claim_number']}*
 👤 Staff: {employee_name}
+{claim_type_label}
 📁 Category: {full_claim.get('category_name', 'N/A')}
 📍 Location: {full_claim.get('location_name', 'N/A')}
 💵 Amount: {format_currency(amount)}

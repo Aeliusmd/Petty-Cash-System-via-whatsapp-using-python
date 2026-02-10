@@ -184,7 +184,6 @@ docker compose -f docker-compose.waha-only.yaml up
 ```powershell
 conda activate petty_cash
 python run.py
-ngrok http 4101
 ```
 
 **Terminal 3 - Frontend (Local npm):**
@@ -193,6 +192,12 @@ ngrok http 4101
 cd frontend
 npm install
 npm run dev
+```
+
+**Terminal 4 - Ngrok (Local Python to https but optional):**
+
+```powershell
+ngrok http 4101
 ```
 
 ### Step 4: Start WAHA Session

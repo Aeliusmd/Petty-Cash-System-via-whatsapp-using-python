@@ -399,26 +399,6 @@ The employee has been notified and can appeal."""
     
 
 
-    # ===== HANDLE GREETINGS - SHOW MAIN MENU =====
-    if text in ('hi', 'hello', 'hey', 'menu', 'start'):
-        # Get categories for this employee's unit
-        categories = await get_categories_for_employee(employee)
-        category_menu = generate_category_menu(categories)
-        
-        await conversation_model.update(chat_id, {
-            'current_step': 'menu',
-            'category': None,
-            'context': {'available_categories': [cat['id'] for cat in categories]}
-        })
-        
-        return f"""🙏 Welcome, *{employee['name']}*!
-
-You are registered as Grade {employee.get('grade_code') or 'N/A'} at {employee.get('location_name') or 'N/A'}.
-
-Please select a category:
-{category_menu}
-
-Reply with the number or category name."""
 
     # ===== HANDLE APPEAL COMMAND =====
     if text == 'appeal':
@@ -528,6 +508,9 @@ Type "hi" or "menu" for more options."""
         # If in receipt_upload step, DON'T process here - let the dedicated multi-receipt handler below handle it
         if current_step == 'receipt_upload':
             pass  # Fall through to the receipt_upload handler below
+        # Exclude advance flow steps - they have their own handler
+        elif current_step in ('advance_category_select', 'advance_amount', 'advance_description', 'advance_quotation', 'advance_confirm'):
+            pass  # Fall through to advance flow handler
         elif category and current_step not in ('initial', 'menu'):
             await conversation_model.update(chat_id, {
                 'current_step': 'confirm',
@@ -622,30 +605,307 @@ Please select a valid category number or name."""
 
 Type *confirm* to submit or *menu* to start over."""
 
-    # Handle greetings (duplicated check, kept for safety but using new logic)
+    # ===== HANDLE GREETINGS - SHOW MAIN MENU =====
     if text in ('hi', 'hello', 'hey', 'menu', 'start'):
-        # Get categories for this employee's unit
-        categories = await get_categories_for_employee(employee)
-        category_menu = generate_category_menu(categories)
-        
+        # Reset conversation to ensure clean state
         await conversation_model.update(chat_id, {
-            'current_step': 'menu',
+            'current_step': 'choose_flow',
             'category': None,
-            'context': {'available_categories': [cat['id'] for cat in categories]}
+            'context': {}
         })
         
-        return f"""🙏 Welcome, *{employee['name']}*!
+        return f"""👋 Welcome, *{employee['name']}*!
 
-You are registered as Grade {employee.get('grade_code') or 'N/A'} at {employee.get('location_name') or 'N/A'}.
+Please select an option:
+
+1️⃣ Reimbursement (After Pay)
+2️⃣ Advance Request (Before Pay)
+
+Reply with *1* or *2*."""
+
+    # ===== HANDLE FLOW SELECTION =====
+    current_step = state.get('current_step')
+    
+    if current_step == 'choose_flow':
+        if text == '1' or 'reimburse' in text:
+            # OPTION 1: REIMBURSEMENT (Existing Flow)
+            # Get categories for this employee's unit
+            categories = await get_categories_for_employee(employee)
+            category_menu = generate_category_menu(categories)
+            
+            await conversation_model.update(chat_id, {
+                'current_step': 'menu',
+                'context': {'available_categories': [cat['id'] for cat in categories], 'claim_intent': 'reimbursement'}
+            })
+            
+            return f"""🔄 *Reimbursement Request*
 
 Please select a category:
 {category_menu}
 
 Reply with the number or category name."""
+            
+        elif text == '2' or 'advance' in text or 'before' in text:
+            # OPTION 2: ADVANCE REQUEST (New Flow)
+            # Get categories for this employee's unit
+            categories = await get_categories_for_employee(employee)
+            category_menu = generate_category_menu(categories)
+            
+            await conversation_model.update(chat_id, {
+                'current_step': 'advance_category_select',
+                'category': 'ADVANCE', # Marker
+                'context': {
+                    'claim_intent': 'advance',
+                    'available_categories': [cat['id'] for cat in categories]
+                }
+            })
+            
+            return f"""💰 *Advance Request*
 
-    # Handle category selection from menu
-    current_step = state.get('current_step', 'initial')
-    if current_step in ('menu', 'initial'):
+Please select a category for this advance:
+{category_menu}
+
+Reply with the number or category name."""
+        
+        else:
+             return """❌ Invalid selection. Please reply with *1* for Reimbursement or *2* for Advance."""
+
+    # ===== ADVANCE FLOW STEPS =====
+    
+    # Step 0: Advance Category Selection
+    if current_step == 'advance_category_select':
+        # Get available categories from context or fetch fresh
+        available_ids = context.get('available_categories')
+        all_categories = []
+        
+        if available_ids:
+            all_categories = await get_categories_for_employee(employee)
+        else:
+            all_categories = await get_categories_for_employee(employee)
+            
+        selected_cat = match_category_from_input(text, all_categories)
+        
+        if not selected_cat:
+            return """❌ Invalid selection. Please reply with the *number* or *name* of the category."""
+            
+        # Store selected category
+        context.update({
+            'category_id': selected_cat['id'],
+            'category_name': selected_cat['name']
+        })
+        
+        await conversation_model.update(chat_id, {
+            'current_step': 'advance_amount',
+            'context': context
+        })
+        
+        return f"""✅ Selected: *{selected_cat['name']}*
+
+💰 Please enter the *amount* you need:
+
+Example: "Rs. 5000" or just "5000"."""
+
+
+    # Step 1: Advance Amount
+    if current_step == 'advance_amount':
+        amount = extract_amount(text)
+        if not amount:
+             # Try simple number parsing
+             try:
+                 clean_text = re.sub(r'[^\d.]', '', text)
+                 amount = float(clean_text)
+             except:
+                 pass
+        
+        if not amount or amount <= 0:
+            return """❌ Please enter a valid amount.
+            
+Example: "5000" or "Rs. 5000"."""
+            
+        context.update({
+            'user_amount': amount,
+            'total_amount': amount # System amount matches user amount initially
+        })
+        
+        await conversation_model.update(chat_id, {
+            'current_step': 'advance_description',
+            'context': context
+        })
+        
+        return f"""💰 Amount: *{format_currency(amount)}*
+
+📝 What is this advance for?
+Please provide a brief description."""
+
+    # Step 2: Advance Description
+    if current_step == 'advance_description':
+        description = message_text.strip()
+        if len(description) < 3:
+            return "❌ Please provide a valid description (at least 3 characters)."
+            
+        context.update({
+            'details': description
+        })
+        
+        await conversation_model.update(chat_id, {
+            'current_step': 'advance_quotation',
+            'context': context
+        })
+        
+        return f"""📝 Description: "{description}"
+
+📎 *Upload Quotation (Optional)*
+
+Please upload a Quotation/Invoice image if you have one.
+The system will analyze it. You can upload multiple quotations.
+
+Type *skip* to proceed without quotations."""
+
+    # Step 3: Advance Quotation (Optional - Multi-upload)
+    if current_step == 'advance_quotation':
+        # Handle 'skip' - only on first upload
+        receipts = context.get('receipts', [])
+        if text in ('skip', 'no', 'none') and len(receipts) == 0:
+            await conversation_model.update(chat_id, {
+                'current_step': 'advance_confirm',
+                'context': context
+            })
+            
+            return _generate_advance_summary(employee, context)
+        
+        # Handle 'done' - finish uploading
+        if text in ('done', 'finish', 'next', 'confirm'):
+            if len(receipts) > 0:
+                await conversation_model.update(chat_id, {
+                    'current_step': 'advance_confirm',
+                    'context': context
+                })
+                return _generate_advance_summary(employee, context)
+            else:
+                return """⚠️ No quotations uploaded yet. Upload at least one or type *skip*."""
+
+        # Handle Upload
+        if media_info or '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
+             # If media was uploaded, webhooks.py already processed it partially
+             # We just need to link it and maybe update amount if detected
+             
+             # Extract extraction info if available from text (injected by webhook)
+             extracted_amount = None
+             extracted_vendor = None
+             if '[RECEIPT/DOCUMENT UPLOADED]' in message_text:
+                 if 'Detected amount:' in message_text:
+                    amount_part = message_text.split('Detected amount:', 1)[1]
+                    amount_match = re.search(r'Rs\.?\s*([\d,\.]+)', amount_part)
+                    if amount_match:
+                         try:
+                             extracted_amount = float(amount_match.group(1).replace(',', ''))
+                         except: pass
+                 
+                 if 'Vendor:' in message_text:
+                    vendor_part = message_text.split('Vendor:', 1)[1]
+                    vendor_match = re.search(r'Vendor:\s*([^\n]+)', message_text)
+                    if vendor_match:
+                        extracted_vendor = vendor_match.group(1).strip()
+
+             # Save the file info
+             receipt_entry = {
+                'file_path': media_info.get('saved_filename'),
+                'file_name': media_info.get('saved_filename'),
+                'ocr_amount': extracted_amount or 0,
+                'vendor': extracted_vendor,
+                'file_type': media_info.get('mimetype'),
+                'message_id': media_info.get('message_id')
+             }
+             
+             # Save to list of receipts (quotations)
+             receipts.append(receipt_entry)
+             context['receipts'] = receipts
+             context['has_quotation'] = True
+             
+             await conversation_model.update(chat_id, {
+                'current_step': 'advance_quotation',  # Stay in same step for more uploads
+                'context': context
+             })
+             
+             # Show confirmation and prompt for more
+             quotation_count = len(receipts)
+             amount_text = f" (Rs. {extracted_amount:,.0f})" if extracted_amount else ""
+             vendor_text = f" - {extracted_vendor}" if extracted_vendor else ""
+             
+             return f"""✅ Quotation #{quotation_count} uploaded{amount_text}{vendor_text}
+
+📎 Upload another quotation or type *done* to continue."""
+        
+        return """📎 Please upload an image/document, type *done* to finish, or *skip* to proceed without quotations."""
+
+
+    # Step 4: Advance Confirm
+    if current_step == 'advance_confirm':
+        if text in ('confirm', 'yes', 'submit', 'ok'):
+            try:
+                # Create the claim
+                claim = await claim_model.create({
+                    'employee_id': employee['id'],
+                    'category_id': context.get('category_id') or await _get_advance_category_id(), 
+                    'location_id': employee.get('location_id'),
+                    'claim_type': 'advance',
+                    'duration_days': 1,
+                    'user_amount': context.get('user_amount'),
+                    'system_amount': context.get('user_amount'), # Use user amount as system amount for advances typically
+                    'description': context.get('details'),
+                    'manager_id': employee.get('manager_id')
+                })
+                
+                # Save quotations (as receipts)
+                receipts = context.get('receipts', [])
+                media_info_list = []
+                
+                for r in receipts:
+                    await claim_model.add_receipt(
+                        claim_id=claim['id'],
+                        file_path=r.get('file_path'),
+                        file_name=r.get('file_name'),
+                        file_type=r.get('file_type'),
+                        ocr_amount=r.get('ocr_amount', 0),
+                        message_id=r.get('message_id'),
+                        vendor=r.get('vendor')  # Add vendor from quotation
+                    )
+                    media_info_list.append({
+                         'saved_filename': r.get('file_path'),
+                         'mimetype': r.get('file_type')
+                    })
+                
+                # Notifications
+                from app.services import notification_service
+                if employee.get('manager_id'):
+                    await notification_service.notify_manager_of_new_claim(claim, media_info_list)
+                
+                await conversation_model.reset(chat_id)
+                
+                return f"""🎉 *Advance Request Submitted!*
+
+📋 Ref: *{claim['claim_number']}*
+💵 Amount: {format_currency(claim.get('user_amount'))}
+⏳ Status: Pending Approval
+
+Type "menu" to start over."""
+            
+            except Exception as e:
+                print(f"❌ Error creating advance: {e}")
+                return "❌ Error submitting request. Please try again."
+                
+        elif text in ('cancel', 'no'):
+            await conversation_model.reset(chat_id)
+            return "❌ Request cancelled."
+            
+        else:
+             return "Type *confirm* to submit or *cancel*."
+
+
+    # ===== HANDLING EXISTING FLOWS (Reimbursement) =====
+    
+    # Handle category selection from menu (ONLY if Step is 'menu' now)
+    if current_step == 'menu': # Changed from 'in' to '==' to be strict
         # Get available categories from context or fetch fresh
         available_ids = context.get('available_categories')
         all_categories = []
@@ -1204,7 +1464,7 @@ Or type:
                                 ocr_amount=stored_media_info.get('extracted_amount'),
                                 ocr_raw_text=stored_media_info.get('ocr_text'),
                                 message_id=stored_media_info.get('message_id'),
-                                vendor=stored_media_info.get('vendor')  # Add vendor for legacy path
+                                vendor=stored_media_info.get('vendor') or context.get('receipt_vendor')  # Add vendor from legacy path or context
                             )
                             media_info_list.append(stored_media_info)
                             print(f"✅ Receipt saved to database successfully")
@@ -1263,8 +1523,65 @@ Type "menu" to submit another claim."""
         await conversation_model.reset(chat_id)
         return '❌ Cancelled. Type "hi" or "menu" to start again.'
 
+
     # Default response
     return """🤔 I didn't understand that.
 
 Type "hi" or "menu" to see available options, or select:
 1️⃣ Batta | 2️⃣ Fuel | 3️⃣ Accommodation | 4️⃣ Sundry"""
+
+
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+
+async def _get_advance_category_id() -> int:
+    """Helper to find or fallback to a category ID for Advance claims"""
+    # Try to find 'ADVANCE' category
+    try:
+        cat = await category_model.find_by_code('ADVANCE')
+        if cat:
+            return cat['id']
+            
+        # Try to find 'General' or 'Sundry'
+        cat = await category_model.find_by_code('SUNDRY')
+        if cat:
+            return cat['id']
+            
+        # Fallback to first available
+        cats = await category_model.find_all()
+        if cats:
+             return cats[0]['id']
+    except:
+        pass
+        
+    return 1 # Fallback to ID 1 if all else fails
+
+
+def _generate_advance_summary(employee: dict, context: dict) -> str:
+    """Generate summary string for advance request"""
+    amount = context.get('user_amount', 0)
+    desc = context.get('details', 'N/A')
+    has_quote = context.get('has_quotation', False)
+    receipts = context.get('receipts', [])
+    
+    # Build quotation section
+    quote_section = ""
+    if receipts and len(receipts) > 0:
+        quote_section = f"\n\n📎 *Quotations ({len(receipts)}):*"
+        for i, receipt in enumerate(receipts, 1):
+            q_amount = receipt.get('ocr_amount', 0)
+            q_vendor = receipt.get('vendor', 'Unknown')
+            amount_text = f"Rs. {q_amount:,.0f}" if q_amount > 0 else "Amount not detected"
+            quote_section += f"\n  {i}. {amount_text} - {q_vendor}"
+    else:
+        quote_section = "\n\n📎 Quotation: Skipped"
+    
+    return f"""✅ *Advance Request Summary*
+
+👤 Employee: {employee['name']}
+💰 Amount: {format_currency(amount)}
+📝 For: {desc}{quote_section}
+
+Type *confirm* to submit or *cancel*."""
+

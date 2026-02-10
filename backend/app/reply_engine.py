@@ -827,14 +827,26 @@ Type *skip* to proceed without quotations."""
                 'context': context
              })
              
-             # Show confirmation and prompt for more
+             # Show confirmation and prompt for more - match receipt upload style
              quotation_count = len(receipts)
-             amount_text = f" (Rs. {extracted_amount:,.0f})" if extracted_amount else ""
-             vendor_text = f" - {extracted_vendor}" if extracted_vendor else ""
              
-             return f"""✅ Quotation #{quotation_count} uploaded{amount_text}{vendor_text}
+             # Calculate running total
+             total_from_quotations = sum(float(r.get('ocr_amount', 0) or 0) for r in receipts)
+             requested_amount = context.get('user_amount', 0)
+             
+             # Build attractive message
+             vendor_line = f"🏪 Vendor: {extracted_vendor}" if extracted_vendor else ""
+             amount_line = f"💰 Amount: Rs. {extracted_amount:,.0f}" if extracted_amount else "💰 Amount: Not detected"
+             
+             message = f"""✅ *Quotation #{quotation_count} Saved*
+{amount_line}
+{vendor_line}
 
-📎 Upload another quotation or type *done* to continue."""
+🧮 *Running Total:* Rs. {total_from_quotations:,.0f} / Rs. {requested_amount:,.0f}
+
+📎 Upload quotation #{quotation_count + 1} or type *done* to finish"""
+             
+             return message
         
         return """📎 Please upload an image/document, type *done* to finish, or *skip* to proceed without quotations."""
 
@@ -1577,11 +1589,23 @@ def _generate_advance_summary(employee: dict, context: dict) -> str:
     else:
         quote_section = "\n\n📎 Quotation: Skipped"
     
-    return f"""✅ *Advance Request Summary*
+    # Calculate total from quotations if any
+    total_section = ""
+    if receipts and len(receipts) > 0:
+        total_from_quotations = sum(float(r.get('ocr_amount', 0) or 0) for r in receipts)
+        if total_from_quotations > 0:
+            total_section = f"\n\n🧮 *Total from quotations:* Rs. {total_from_quotations:,.0f}"
+    
+    # Get category name from context
+    category_name = context.get('category_name', 'N/A')
+    
+    return f"""✅ *Claim Summary*
 
 👤 Employee: {employee['name']}
-💰 Amount: {format_currency(amount)}
-📝 For: {desc}{quote_section}
+📁 Category: {category_name}
+📝 Details: {desc}
+💵 Amount: {format_currency(amount)}{quote_section}{total_section}
 
-Type *confirm* to submit or *cancel*."""
+Type *confirm* to submit or *menu* to start over."""
+
 

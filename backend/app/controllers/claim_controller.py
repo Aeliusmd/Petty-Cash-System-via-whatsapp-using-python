@@ -36,6 +36,7 @@ class ClaimController(BaseController):
         self.router.get("/{claim_id}/receipts")(self.get_claim_receipts)
         self.router.get("/{claim_id}/history")(self.get_claim_history)
         self.router.post("/")(self.create_claim)
+        self.router.post("/advance")(self.create_advance_claim)  # New endpoint for advance claims
         self.router.post("/{claim_id}/approve")(self.approve_claim)
         self.router.post("/{claim_id}/reject")(self.reject_claim)
         self.router.post("/{claim_id}/appeal")(self.appeal_claim)
@@ -258,6 +259,106 @@ class ClaimController(BaseController):
             print(f"⚠️ Failed to notify manager: {e}")
         
         return self.success_response(data=claim.to_dict(), message="Claim created successfully")
+    
+    async def create_advance_claim(
+        self,
+        request: Request,
+        category_id: int = Form(...),
+        amount: float = Form(...),
+        description: str = Form(...),
+        location_id: int = Form(None),
+        quotations: List[UploadFile] = File(None),
+        auth: dict = Depends(require_permission("claims.create"))
+    ):
+        """Create new advance claim with optional quotation upload"""
+        service = ClaimService(request)
+        
+        # Get employee to determine manager
+        from app.models.employee import Employee
+        employee = await Employee.find_by_id(auth['employee_id'])
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Determine final amount: prioritize user-entered amount, then extract from quotations
+        final_amount = amount  # Start with user-entered amount
+        total_from_quotations = 0
+        
+        # Handle quotation uploads first to extract amounts
+        quotation_data = []
+        if quotations:
+            for quotation in quotations:
+                content = await quotation.read()
+                quotation_data.append({
+                    'bytes': content,
+                    'filename': quotation.filename,
+                    'content_type': quotation.content_type
+                })
+        
+        # Only extract amounts from quotations if user didn't provide amount
+        if quotation_data and not amount:
+            # Use shared receipt processing to extract data from quotations
+            from app.services.textract_service import extract_expense_data
+            
+            for quot_file in quotation_data:
+                try:
+                    extraction = await extract_expense_data(quot_file['bytes'])
+                    if extraction and extraction.get('success'):
+                        extracted_amount = extraction.get('expense', {}).get('total')
+                        if extracted_amount:
+                            # Clean and convert amount
+                            amount_str = str(extracted_amount).replace(',', '').replace('Rs.', '').strip()
+                            try:
+                                total_from_quotations += float(amount_str)
+                            except ValueError:
+                                pass
+                except Exception as e:
+                    print(f"⚠️ Failed to extract from quotation: {e}")
+            
+            # Use total from quotations if extraction was successful
+            if total_from_quotations > 0:
+                final_amount = total_from_quotations
+                print(f"💰 Using total from quotations: Rs. {final_amount:,.0f}")
+        else:
+            print(f"💰 Using user-entered amount: Rs. {final_amount:,.0f}")
+
+        
+        claim_data = {
+            'employee_id': auth['employee_id'],
+            'category_id': category_id,
+            'location_id': location_id or employee.location_id,
+            'user_amount': final_amount,
+            'description': description,
+            'manager_id': employee.manager_id,
+            'claim_type': 'advance'  # Mark as advance claim
+        }
+        
+        claim = await service.create_claim(
+            data=claim_data,
+            created_by=auth['employee_id'],
+            organization_id=auth.get('organization_id')
+        )
+        
+        # Save quotations as receipts
+        if quotation_data:
+            result = await service.process_and_save_receipts(
+                claim_id=claim.id,
+                receipt_files=quotation_data,
+                employee_id=auth['employee_id'],
+                organization_id=auth.get('organization_id')
+            )
+            print(f"✅ Saved {len(quotation_data)} quotations for advance claim {claim.id}")
+        
+        # Notify manager
+        try:
+            claim_dict = claim.to_dict()
+            claim_dict['employee_name'] = employee.name
+            claim_dict['employee_code'] = employee.employee_code
+            await notify_manager_of_new_claim(claim_dict)
+        except Exception as e:
+            print(f"⚠️ Failed to notify manager: {e}")
+        
+        return self.success_response(data=claim.to_dict(), message="Advance claim created successfully")
+
     
     async def approve_claim(
         self,

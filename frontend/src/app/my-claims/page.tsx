@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import NewClaimModal from '@/components/NewClaimModal';
+import UnifiedClaimModal from '@/components/UnifiedClaimModal';
 import ClaimDetailsModal from '@/components/ClaimDetailsModal';
 import { authenticatedFetch } from '@/utils/api';
 
@@ -153,8 +153,8 @@ function MyClaimsContent() {
         </div>
       </div>
 
-      {/* New Claim Modal */}
-      <NewClaimModal
+      {/* Unified Claim Modal */}
+      <UnifiedClaimModal
         isOpen={showNewClaimModal}
         onClose={() => setShowNewClaimModal(false)}
         onSuccess={() => fetchClaims()}

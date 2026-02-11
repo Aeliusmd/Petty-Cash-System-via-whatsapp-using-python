@@ -83,71 +83,6 @@ function getCategoryIcon(code: string): string {
   }
 }
 
-// SecureImage component to fetch images with auth headers (bypassing ngrok warning)
-function SecureImage({ src, alt, className, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadImage() {
-      if (!src) return;
-      
-      try {
-        setLoading(true);
-        setError(false);
-        
-        // Use authenticatedFetch to include ngrok-skip-browser-warning header
-        const response = await authenticatedFetch(src);
-        
-        if (!response.ok) throw new Error('Failed to load image');
-        
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        
-        if (mounted) {
-          setObjectUrl(url);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error('Error loading image:', err);
-        if (mounted) {
-          setError(true);
-          setLoading(false);
-        }
-      }
-    }
-
-    loadImage();
-
-    return () => {
-      mounted = false;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [src]);
-
-  if (loading) {
-    return (
-      <div className={`${className} bg-gray-200 animate-pulse flex items-center justify-center`}>
-        <span className="text-gray-400 text-xs">Loading...</span>
-      </div>
-    );
-  }
-
-  if (error || !objectUrl) {
-    return (
-      <div className={`${className} bg-gray-100 flex items-center justify-center text-gray-400`}>
-        <span className="text-xs text-center p-1">Failed to load</span>
-      </div>
-    );
-  }
-
-  return <img src={objectUrl} alt={alt} className={className} {...props} />;
-}
 
 export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetailsModalProps) {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -216,7 +151,10 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
     // But backend mounts "uploads" dir to "/api/uploads", so we need just the filename.
     
     const fileName = receipt.file_path.split('/').pop() || receipt.file_path;
-    return `${API_BASE_URL}/api/uploads/${fileName}`;
+    const backendUrl = `${API_BASE_URL}/api/uploads/${fileName}`;
+    
+    // Use API proxy to bypass Ngrok browser warning and handle CORS
+    return `/api/image-proxy?url=${encodeURIComponent(backendUrl)}`;
   }
 
   function isImageFile(receipt: Receipt): boolean {
@@ -534,11 +472,12 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                               style={{ minHeight: '150px', minWidth: '150px' }}
                               onClick={() => setSelectedImage(getFileUrl(receipt))}
                             >
-                              {/* Use SecureImage to fetch with auth headers and bypass ngrok warning */}
-                              <SecureImage
+                              {/* Use standard img tag with proxy URL to load image */}
+                              <img
                                 src={getFileUrl(receipt)}
                                 alt={receipt.file_name}
                                 className="w-full h-full object-cover"
+                                loading="lazy"
                               />
                               {(receipt.ocr_amount || receipt.vendor) && (
                                 <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-2">
@@ -744,7 +683,7 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          <SecureImage
+          <img
             src={selectedImage}
             alt="Receipt"
             className="max-w-full max-h-[90vh] object-contain"

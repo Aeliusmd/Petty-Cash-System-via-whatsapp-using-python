@@ -133,6 +133,13 @@ function ClaimsContent() {
 
   useEffect(() => {
     fetchClaims();
+    
+    // Auto-refresh every 10 seconds (silent refresh)
+    const interval = setInterval(() => {
+      fetchClaims(true); // true = silent refresh, no loading state
+    }, 10000);
+    
+    return () => clearInterval(interval);
   }, [activeStatus, selectedEmployeeId, currentPage, itemsPerPage]);
 
   // Close suggestions when clicking outside
@@ -155,8 +162,11 @@ function ClaimsContent() {
     }
   }
 
-  async function fetchClaims() {
-    setLoading(true);
+  async function fetchClaims(silent = false) {
+    // Only show loading state if not a silent background refresh
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       if (activeStatus) {
@@ -182,9 +192,14 @@ function ClaimsContent() {
       setClaims(data.claims || []);
       setTotal(data.total || 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load claims');
+      // Only set error on non-silent refresh to avoid disrupting user
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Failed to load claims');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -305,7 +320,7 @@ function ClaimsContent() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Claims</h2>
-          <p className="text-gray-900">{total} total claims</p>
+          <p className="text-gray-900">{total} total claims • Auto-refreshes every 10s</p>
         </div>
         {/* New Claim Button - only visible with claims.create permission */}
         {canCreateClaim && (

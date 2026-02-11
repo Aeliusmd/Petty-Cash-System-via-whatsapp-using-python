@@ -92,13 +92,23 @@ function MyClaimsContent() {
     if (isLoading) return;
     if (user) {
       fetchClaims();
+      
+      // Auto-refresh every 10 seconds (silent refresh)
+      const interval = setInterval(() => {
+        fetchClaims(true); // true = silent refresh, no loading state
+      }, 10000);
+      
+      return () => clearInterval(interval);
     }
   }, [user, activeStatus, currentPage, isLoading]);
 
-  async function fetchClaims() {
+  async function fetchClaims(silent = false) {
     if (!user) return;
     
-    setLoading(true);
+    // Only show loading state if not a silent background refresh
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       params.set('employee_id', user.id.toString());
@@ -114,9 +124,14 @@ function MyClaimsContent() {
       setClaims(data.claims || []);
       setTotal(data.total || 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load claims');
+      // Only set error on non-silent refresh to avoid disrupting user
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Failed to load claims');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -135,7 +150,7 @@ function MyClaimsContent() {
           <p className="text-gray-600">
             Welcome, {user.name} ({user.employee_code})
           </p>
-          <p className="text-sm text-gray-500">{total} total claims</p>
+          <p className="text-sm text-gray-500">{total} total claims • Auto-refreshes every 10s</p>
         </div>
         <div className="flex gap-3">
           <button

@@ -8,6 +8,7 @@ export function useDashboard() {
   const { user, isAuthenticated, isLoading, hasAnyPermission } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   // Permission-based access check
   const canViewDashboard = hasAnyPermission(['dashboard.view.org', 'dashboard.view.team']);
@@ -43,16 +44,29 @@ export function useDashboard() {
 
     // If we're here, we are authenticated and authorized to view dashboard
     loadStats();
+    
+    // Auto-refresh every 10 seconds (silent refresh)
+    const interval = setInterval(() => {
+      loadStats(true); // true = silent refresh, no loading state
+    }, 10000);
+    
+    return () => clearInterval(interval);
   }, [isAuthenticated, canViewDashboard, isLoading, router, user]);
 
-  async function loadStats() {
+  async function loadStats(silent = false) {
     try {
       const data = await fetchStats();
       setStats(data);
+      if (!initialLoadComplete) {
+        setInitialLoadComplete(true);
+      }
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     } finally {
-      setLoadingStats(false);
+      // Only update loading state on initial load
+      if (!silent && !initialLoadComplete) {
+        setLoadingStats(false);
+      }
     }
   }
 

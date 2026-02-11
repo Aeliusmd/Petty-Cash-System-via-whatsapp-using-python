@@ -466,6 +466,7 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                             <div 
                               key={receipt.id}
                               className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-indigo-500 transition-all"
+                              style={{ minHeight: '150px', minWidth: '150px' }}
                               onClick={() => setSelectedImage(getFileUrl(receipt))}
                             >
                               <Image
@@ -473,8 +474,10 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                                 alt={receipt.file_name}
                                 fill
                                 className="object-cover"
+                                style={{ objectFit: 'cover' }}
                                 sizes="(max-width: 768px) 50vw, 33vw"
-                                unoptimized={true} // Bypass Next.js optimization to avoid private IP errors
+                                unoptimized={true}
+                                priority={false}
                               />
                               {(receipt.ocr_amount || receipt.vendor) && (
                                 <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-2">

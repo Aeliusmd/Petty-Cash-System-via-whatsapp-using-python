@@ -150,7 +150,7 @@ function MyClaimsContent() {
           <p className="text-gray-600">
             Welcome, {user.name} ({user.employee_code})
           </p>
-          <p className="text-sm text-gray-500">{total} total claims • Auto-refreshes every 10s</p>
+          <p className="text-sm text-gray-500">{total} total claims</p>
         </div>
         <div className="flex gap-3">
           <button

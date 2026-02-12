@@ -320,7 +320,7 @@ function ClaimsContent() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Claims</h2>
-          <p className="text-gray-900">{total} total claims • Auto-refreshes every 10s</p>
+          <p className="text-gray-900">{total} total claims</p>
         </div>
         {/* New Claim Button - only visible with claims.create permission */}
         {canCreateClaim && (

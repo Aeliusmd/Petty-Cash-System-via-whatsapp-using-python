@@ -35,7 +35,7 @@ export default function DashboardPage() {
               <span>{user.organization_name}</span>
             </div>
           )}
-          <p className="text-indigo-100 text-lg">Here's what's happening in your Petty Cash system. • Auto-refreshes every 10s</p>
+          <p className="text-indigo-100 text-lg">Here's what's happening in your Petty Cash system.</p>
         </div>
         <div className="absolute right-0 top-0 h-full w-1/3 bg-white/10 skew-x-12 transform translate-x-12"></div>
       </div>

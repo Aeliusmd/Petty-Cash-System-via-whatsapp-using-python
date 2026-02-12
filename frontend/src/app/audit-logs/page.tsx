@@ -197,7 +197,7 @@ export default function AuditLogsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Audit Logs</h2>
-          <p className="text-gray-900">Track all system activities and changes • Auto-refreshes every 10s</p>
+          <p className="text-gray-900">Track all system activities and changes</p>
         </div>
         <div className="text-sm text-gray-500">
           {auditLogs.length > 0 && (

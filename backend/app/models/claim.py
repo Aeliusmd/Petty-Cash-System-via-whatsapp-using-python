@@ -141,7 +141,8 @@ class Claim(BaseModel):
 
         # 2. Get Data
         query = f"""
-            SELECT c.*, cat.code as category_code, cat.name as category_name,
+            SELECT c.*, e.name as employee_name, e.employee_code,
+                   cat.code as category_code, cat.name as category_name,
                    l.name as location_name, s.code as status_code, s.name as status_name
             FROM claims c
             JOIN employees e ON c.employee_id = e.id

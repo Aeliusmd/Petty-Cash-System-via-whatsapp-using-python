@@ -70,7 +70,7 @@ export default function AuditLogsPage() {
       
       // Auto-refresh every 10 seconds
       const interval = setInterval(() => {
-        fetchAuditLogs();
+        fetchAuditLogs(true);
       }, 10000);
       
       return () => clearInterval(interval);
@@ -79,9 +79,9 @@ export default function AuditLogsPage() {
 
 
 
-  const fetchAuditLogs = async () => {
+  const fetchAuditLogs = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       if (!token) {
         return;
       }
@@ -109,8 +109,7 @@ export default function AuditLogsPage() {
         return;
       }
 
-      const data = await response.json(); // authenticatedFetch throws if !ok is checked manually, but here we check status first or trust .json() if ok. 
-      // Actually authenticatedFetch returns response. logic below needs to be consistent. 
+      const data = await response.json(); 
       
       if (!response.ok) throw new Error('Failed to fetch audit logs');
 
@@ -120,7 +119,7 @@ export default function AuditLogsPage() {
       console.error('Error fetching audit logs:', error);
       // Don't show alert on auto-refresh errors
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

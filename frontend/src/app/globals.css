@@ -345,6 +345,19 @@ body > div > main > div > div:first-child .text-gray-500 {
   text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
 }
 
+.bg-white .text-blue-600,
+.bg-white a.text-blue-600 {
+  color: #2563eb !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bg-white .text-blue-600:hover,
+.bg-white a.text-blue-600:hover {
+  color: #1d4ed8 !important;
+  text-shadow: 0 0 10px rgba(37, 99, 235, 0.5);
+}
+
 /* ===== MODALS ===== */
 .fixed.inset-0 {
   animation: fadeIn 0.2s ease;

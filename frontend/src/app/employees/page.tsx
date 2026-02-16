@@ -345,22 +345,28 @@ export default function EmployeesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => openEditModal(employee)}
-                        className="px-2 py-1 text-sm text-indigo-600 hover:text-indigo-800"
-                      >
-                        Edit
-                      </button>
-                      {employee.is_active && (
+                      <div className="flex gap-2">
                         <button
-                          onClick={() => handleDelete(employee)}
-                          className="px-2 py-1 text-sm text-red-600 hover:text-red-800"
+                          onClick={() => openEditModal(employee)}
+                          className="px-2 py-1 text-sm text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors"
                         >
-                          Delete
+                          Edit
                         </button>
-                      )}
-                    </div>
+                        {employee.is_active && (
+                          <button
+                            onClick={() => handleDelete(employee)}
+                            className="px-2 py-1 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
+                          >
+                            Delete
+                          </button>
+                        )}
+                        <button
+                          onClick={() => router.push(`/claims?employee_id=${employee.id}`)}
+                          className="px-2 py-1 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
+                        >
+                          Claims
+                        </button>
+                      </div>
                   </td>
                 </tr>
               ))}

@@ -89,8 +89,9 @@ function ClaimsContent() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const paramEmployeeId = searchParams.get('employee_id');
   const [activeStatus, setActiveStatus] = useState(statusFilter);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(paramEmployeeId || '');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -114,6 +115,16 @@ function ClaimsContent() {
 
   // Modal state for new claim
   const [showNewClaimModal, setShowNewClaimModal] = useState(false);
+
+  // Sync search text when employees load if filtering by URL param
+  useEffect(() => {
+    if (selectedEmployeeId && employees.length > 0 && !employeeSearch) {
+      const emp = employees.find(e => e.id.toString() === selectedEmployeeId);
+      if (emp) {
+        setEmployeeSearch(`${emp.name} (${emp.employee_code})`);
+      }
+    }
+  }, [selectedEmployeeId, employees]);
 
   useEffect(() => {
     if (isLoading) return;

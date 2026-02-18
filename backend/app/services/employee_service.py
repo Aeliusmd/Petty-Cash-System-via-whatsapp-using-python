@@ -39,6 +39,7 @@ class EmployeeService(BaseService):
         self,
         role: str = None,
         location_id: int = None,
+        unit_id: int = None,
         organization_id: int = None,
         include_inactive: bool = False
     ) -> List[Employee]:
@@ -46,6 +47,7 @@ class EmployeeService(BaseService):
         return await Employee.find_all_with_details(
             role=role,
             location_id=location_id,
+            unit_id=unit_id,
             organization_id=organization_id,
             include_inactive=include_inactive
         )

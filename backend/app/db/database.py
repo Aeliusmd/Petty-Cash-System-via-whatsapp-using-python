@@ -28,13 +28,13 @@ class Database:
             max_size=20,
             command_timeout=60
         )
-        print('📦 Connected to PostgreSQL database')
+        print('Connected to PostgreSQL database')
         
     async def close(self):
         """Close connection pool"""
         if self.pool:
             await self.pool.close()
-            print('📦 Database pool closed')
+            print('Database pool closed')
             
     async def check_connection(self) -> bool:
         """Test database connection"""
@@ -43,7 +43,7 @@ class Database:
                 await conn.fetchval('SELECT 1')
             return True
         except Exception as e:
-            print(f'❌ Database connection check failed: {e}')
+            print(f'Database connection check failed: {e}')
             return False
     
     async def query(self, sql: str, *args) -> list[dict]:
@@ -55,11 +55,11 @@ class Database:
                 duration = (time.time() - start) * 1000
                 
                 if duration > 100:
-                    print(f'⚠️ Slow query ({duration:.0f}ms): {sql[:100]}')
+                    print(f'Slow query ({duration:.0f}ms): {sql[:100]}')
                     
                 return [dict(row) for row in rows]
         except Exception as e:
-            print(f'❌ Database query error: {e}')
+            print(f'Database query error: {e}')
             raise
             
     async def query_one(self, sql: str, *args) -> Optional[dict]:

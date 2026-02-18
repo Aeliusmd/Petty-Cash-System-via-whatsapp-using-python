@@ -31,3 +31,6 @@ PyJWT==2.8.0
 
 # Utilities
 python-json-logger==2.0.7
+
+# Excel Export
+openpyxl==3.1.2

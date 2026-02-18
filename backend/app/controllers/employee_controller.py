@@ -41,6 +41,7 @@ class EmployeeController(BaseController):
         request: Request,
         role: Optional[str] = None,
         location_id: Optional[int] = None,
+        unit_id: Optional[int] = None,
         include_inactive: bool = False,
         auth: dict = Depends(require_permission("employees.read.all"))
     ):
@@ -50,6 +51,7 @@ class EmployeeController(BaseController):
         employees = await service.get_all_employees(
             role=role,
             location_id=location_id,
+            unit_id=unit_id,
             organization_id=auth.get('organization_id'),
             include_inactive=include_inactive
         )

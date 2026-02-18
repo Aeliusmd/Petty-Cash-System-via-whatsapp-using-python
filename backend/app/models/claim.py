@@ -47,6 +47,7 @@ class Claim(BaseModel):
     status_name: str = None
     manager_name: str = None
     approver_name: str = None
+    unit_name: str = None
     
     def __init__(self, data: Dict[str, Any] = None):
         """Initialize claim from data dict"""
@@ -103,6 +104,84 @@ class Claim(BaseModel):
             return await cls.find_by_id(result[0]['id'])
         return None
     
+    @classmethod
+    async def find_for_export(cls, 
+                              employee_id: int = None, 
+                              unit_id: int = None, 
+                              status: str = None, 
+                              start_date: date = None, 
+                              end_date: date = None,
+                              organization_id: int = None) -> List['Claim']:
+        """Find claims for export with filters (no pagination)"""
+        where_conditions = ["1=1"]
+        args = []
+        arg_idx = 1
+        
+        if employee_id is not None:
+            where_conditions.append(f"c.employee_id = ${arg_idx}")
+            args.append(employee_id)
+            arg_idx += 1
+            
+        if unit_id is not None:
+            where_conditions.append(f"e.unit_id = ${arg_idx}")
+            args.append(unit_id)
+            arg_idx += 1
+            
+        if status:
+            where_conditions.append(f"s.code = ${arg_idx}")
+            args.append(status)
+            arg_idx += 1
+            
+        if start_date:
+            where_conditions.append(f"c.claim_date >= ${arg_idx}")
+            args.append(start_date)
+            arg_idx += 1
+            
+        if end_date:
+            where_conditions.append(f"c.claim_date <= ${arg_idx}")
+            args.append(end_date)
+            arg_idx += 1
+            
+        if organization_id:
+            where_conditions.append(f"e.organization_id = ${arg_idx}")
+            args.append(organization_id)
+            arg_idx += 1
+            
+        where_clause = " AND ".join(where_conditions)
+        
+        query = f"""
+            SELECT c.*, e.name as employee_name, e.employee_code,
+                   cat.code as category_code, cat.name as category_name,
+                   l.name as location_name, s.code as status_code, s.name as status_name,
+                   u.name as unit_name, m.name as manager_name,
+                   COALESCE(
+                       (SELECT SUM(r.ocr_amount) FROM claim_receipts r WHERE r.claim_id = c.id),
+                       c.system_amount,
+                       0
+                   ) as receipt_total
+            FROM claims c
+            JOIN employees e ON c.employee_id = e.id
+            JOIN claim_categories cat ON c.category_id = cat.id
+            LEFT JOIN locations l ON c.location_id = l.id
+            JOIN claim_statuses s ON c.status_id = s.id
+            LEFT JOIN units u ON e.unit_id = u.id
+            LEFT JOIN employees m ON c.manager_id = m.id
+            WHERE {where_clause}
+            ORDER BY c.created_at DESC
+        """
+        
+        result = await db.query(query, *args)
+        # Manually set the joined fields that aren't in __init__ by default to ensure they are available
+        claims = []
+        for row in result:
+            claim = cls(row)
+            claim.unit_name = row.get('unit_name')
+            claim.manager_name = row.get('manager_name')
+            claim.receipt_total = float(row.get('receipt_total') or 0)
+            claims.append(claim)
+            
+        return claims
+
     @classmethod
     async def find_by_employee(cls, employee_id: int = None, status: str = None, limit: int = 10, offset: int = 0, organization_id: int = None) -> tuple[List['Claim'], int]:
         """Find claims by employee, optionally filtered by status and organization. Returns (claims, total_count)"""
@@ -498,6 +577,26 @@ class Claim(BaseModel):
             ORDER BY uploaded_at DESC
         """, claim_id)
     
+    @classmethod
+    async def calculate_system_amount(cls, claim_id: int) -> float:
+        """Calculate and update system_amount based on receipts"""
+        # Sum receipt amounts
+        result = await db.query("""
+            SELECT COALESCE(SUM(ocr_amount), 0) as total
+            FROM claim_receipts
+            WHERE claim_id = $1
+        """, claim_id)
+        
+        total = float(result[0]['total']) if result else 0.0
+        
+        # Update claim
+        await db.query("""
+            UPDATE claims SET system_amount = $1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+        """, total, claim_id)
+        
+        return total
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert claim to dictionary"""
         return {
@@ -582,6 +681,10 @@ async def find_latest_rejected_for_employee(employee_id: int):
 async def delete(claim_id: int):
     return await Claim.delete(claim_id)
 
+async def find_for_export(**kwargs):
+    claims = await Claim.find_for_export(**kwargs)
+    return [c.to_dict() for c in claims]
+
 async def add_receipt(claim_id: int, file_path: str, file_name: str, 
                       file_type: str = None, file_size: int = None,
                       ocr_amount: float = None, ocr_raw_text: str = None,
@@ -594,3 +697,6 @@ async def check_duplicate_receipt(file_hash: str, current_claim_id: int = None):
 
 async def get_receipts(claim_id: int):
     return await Claim.get_receipts(claim_id)
+
+async def calculate_system_amount(claim_id: int):
+    return await Claim.calculate_system_amount(claim_id)

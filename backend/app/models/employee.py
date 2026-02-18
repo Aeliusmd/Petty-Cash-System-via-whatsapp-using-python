@@ -227,6 +227,7 @@ class Employee(BaseModel):
         cls,
         role: str = None,
         location_id: int = None,
+        unit_id: int = None,
         organization_id: int = None,
         include_inactive: bool = False
     ) -> List['Employee']:
@@ -257,6 +258,11 @@ class Employee(BaseModel):
         if location_id:
             query += f" AND e.location_id = ${param_idx}"
             params.append(location_id)
+            param_idx += 1
+        
+        if unit_id:
+            query += f" AND e.unit_id = ${param_idx}"
+            params.append(unit_id)
             param_idx += 1
         
         if organization_id:

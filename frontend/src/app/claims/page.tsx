@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ClaimDetailsModal from '@/components/ClaimDetailsModal';
 import UnifiedClaimModal from '@/components/UnifiedClaimModal';
+import ExportClaimsModal from '@/components/ExportClaimsModal';
 import ClaimsList from '@/components/ClaimsList';
 import { useAuth } from '@/contexts/AuthContext';
 import { authenticatedFetch } from '@/utils/api';
@@ -80,7 +81,7 @@ function getCategoryIcon(code: string): string {
 
 function ClaimsContent() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, hasAnyPermission } = useAuth();
+  const { isAuthenticated, isLoading, hasAnyPermission, user } = useAuth();
   const searchParams = useSearchParams();
   const statusFilter = searchParams.get('status') || '';
   
@@ -115,6 +116,7 @@ function ClaimsContent() {
 
   // Modal state for new claim
   const [showNewClaimModal, setShowNewClaimModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Sync search text when employees load if filtering by URL param
   useEffect(() => {
@@ -224,6 +226,7 @@ function ClaimsContent() {
         headers: { 
           'Content-Type': 'application/json' 
         },
+        body: JSON.stringify({}),
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -334,14 +337,23 @@ function ClaimsContent() {
           <p className="text-gray-900">{total} total claims</p>
         </div>
         {/* New Claim Button - only visible with claims.create permission */}
-        {canCreateClaim && (
+        <div className="flex gap-2">
           <button
-            onClick={() => setShowNewClaimModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-medium shadow-lg"
+            onClick={() => setShowExportModal(true)}
+            className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-medium shadow-sm flex items-center gap-2"
           >
-            + New Claim
+            <span>📤</span> Export
           </button>
-        )}
+          
+          {canCreateClaim && (
+            <button
+              onClick={() => setShowNewClaimModal(true)}
+              className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-medium shadow-lg"
+            >
+              + New Claim
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Unified Claim Modal */}
@@ -349,6 +361,12 @@ function ClaimsContent() {
         isOpen={showNewClaimModal}
         onClose={() => setShowNewClaimModal(false)}
         onSuccess={() => fetchClaims()}
+      />
+      
+      <ExportClaimsModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        organizationId={user?.organization_id}
       />
 
       {/* Filters Section */}

@@ -44,8 +44,18 @@ async def get_units(
     # Safety: If no org_id, and not specifically requesting generic list... 
     # But usually all users are in an org context.
     if not org_id:
-        # If Super Admin and really wants ALL? 
-        # But User requested ISOLATION. So we default to empty if no context.
+        # If Super Admin, return all units
+        if auth.get('role') == 'super_admin':
+            units = await Unit.find_all()
+            # Normalize response to list of dicts
+            result = []
+            for u in units:
+                if hasattr(u, 'to_dict'):
+                    result.append(u.to_dict())
+                else:
+                    result.append(u)
+            return {"units": result}
+            
         return {"units": []}
 
     units = await Unit.find_by_organization(int(org_id))

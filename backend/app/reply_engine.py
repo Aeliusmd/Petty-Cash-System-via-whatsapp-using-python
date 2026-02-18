@@ -902,6 +902,10 @@ Type *skip* to proceed without quotations."""
                          'warning': r.get('warning')
                     })
                 
+                # Recalculate system amount from saved receipts
+                if receipts:
+                    await claim_model.calculate_system_amount(claim['id'])
+
                 # Notifications
                 from app.services import notification_service
                 if employee.get('manager_id'):
@@ -1439,7 +1443,7 @@ Or type:
                 claim = await claim_model.create({
                     'employee_id': employee['id'],
                     'category_id': category['id'],
-                    'location_id': context.get('location_id') or employee.get('location_id'),
+                    'location_id': context.get('location_id'), # No fallback to employee.location_id per request
                     'claim_type': 'outright' if category_code == 'BATTA' else 'bill',
                     'duration_days': context.get('days', 1),
                     'user_amount': context.get('user_amount'),
@@ -1538,6 +1542,10 @@ Or type:
                             print(f"⚠️ Failed to save receipt to database: {receipt_error}")
                     else:
                         print(f"⚠️ No media_info found in context - receipt NOT saved!")
+                
+                # Recalculate system amount from saved receipts
+                if receipts or media_info_list:
+                    await claim_model.calculate_system_amount(claim['id'])
                 
                 
                 # Notify manager with claim details and receipt

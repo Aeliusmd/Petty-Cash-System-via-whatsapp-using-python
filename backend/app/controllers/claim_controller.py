@@ -5,6 +5,9 @@ API routes for claim management
 
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
+import io
+from datetime import date
 from app.controllers.base import BaseController
 from app.services.claim_service import ClaimService
 from app.services.notification_service import notify_manager_of_new_claim, notify_staff_of_approval, notify_staff_of_rejection
@@ -32,6 +35,7 @@ class ClaimController(BaseController):
         self.router.get("/")(self.get_claims)
         self.router.get("/pending")(self.get_pending_claims)
         self.router.get("/stats")(self.get_claim_stats)
+        self.router.get("/export")(self.export_claims)
         self.router.get("/{claim_id}")(self.get_claim)
         self.router.get("/{claim_id}/receipts")(self.get_claim_receipts)
         self.router.get("/{claim_id}/history")(self.get_claim_history)
@@ -41,6 +45,65 @@ class ClaimController(BaseController):
         self.router.post("/{claim_id}/reject")(self.reject_claim)
         self.router.post("/{claim_id}/appeal")(self.appeal_claim)
         self.router.delete("/{claim_id}")(self.delete_claim)
+
+    async def export_claims(
+        self,
+        request: Request,
+        format: str = 'csv',
+        status: Optional[str] = None,
+        unit_id: Optional[int] = None,
+        employee_id: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        auth: dict = Depends(require_authenticated)
+    ):
+        """Export claims to CSV/Excel"""
+        service = ClaimService(request)
+        permissions = auth.get('permissions', [])
+        
+        # Determine strict filtering based on permissions
+        target_employee_id = employee_id
+        organization_id = auth.get('organization_id')
+        
+        # If requesting specific employee that isn't self, check permission
+        if target_employee_id and target_employee_id != auth['employee_id']:
+            if 'claims.read.all' not in permissions and 'claims.read.team' not in permissions:
+                 raise HTTPException(status_code=403, detail="Cannot export other employees' claims")
+        
+        # If no specific employee requested
+        if not target_employee_id:
+             if 'claims.read.all' not in permissions:
+                 # If can't read all, force self
+                 target_employee_id = auth['employee_id']
+        
+        # Super admin sees all claims unless they've explicitly entered an org
+        if auth.get('role') == 'super_admin' and not auth.get('organization_name'):
+            organization_id = None
+
+        try:
+            output = await service.export_claims(
+                format=format,
+                employee_id=target_employee_id,
+                unit_id=unit_id,
+                status=status,
+                start_date=start_date,
+                end_date=end_date,
+                organization_id=organization_id
+            )
+            
+            filename = f"claims_export_{date.today()}.{format}"
+            media_type = "text/csv" if format == 'csv' else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            
+            return StreamingResponse(
+                output,
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            print(f"Export failed: {e}")
+            raise HTTPException(status_code=500, detail="Export failed")
     
     async def get_claims(
         self,
@@ -205,7 +268,7 @@ class ClaimController(BaseController):
         claim_data = {
             'employee_id': auth['employee_id'],
             'category_id': category_id,
-            'location_id': location_id or employee.location_id,
+            'location_id': location_id, # Removed fallback to employee.location_id
             'user_amount': user_amount,
             'description': description,
             'manager_id': employee.manager_id,

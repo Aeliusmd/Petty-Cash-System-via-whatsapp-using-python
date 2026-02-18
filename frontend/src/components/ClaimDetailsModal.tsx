@@ -354,6 +354,17 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                         <dd className="font-medium text-gray-800">{formatCurrency(claim.system_amount)}</dd>
                       </div>
                     )}
+                    {claim.system_amount && claim.user_amount && Math.abs(claim.system_amount - claim.user_amount) > 1 && (
+                      <div className="flex justify-between text-yellow-700 bg-yellow-50 px-2 py-1 rounded">
+                        <dt>Difference</dt>
+                        <dd className="font-medium">
+                          {formatCurrency(Math.abs(claim.system_amount - claim.user_amount))}
+                          <span className="text-xs ml-1 opacity-75">
+                            ({((Math.abs(claim.system_amount - claim.user_amount) / claim.user_amount) * 100).toFixed(1)}%)
+                          </span>
+                        </dd>
+                      </div>
+                    )}
                     <div className="flex justify-between pt-2 border-t">
                       <dt className="text-gray-700 font-medium">Final Amount</dt>
                       <dd className="font-bold text-lg text-indigo-600">

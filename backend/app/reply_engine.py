@@ -1344,6 +1344,15 @@ Or type:
                     date_part = message_text.split('Date:', 1)[1]
                     extracted_date = date_part.split('\n')[0].strip()
                     print(f"📅 Extracted date: {extracted_date}")
+                
+                # Extract full OCR text (everything between 'Extracted text:' and 'Detected amount:')
+                extracted_ocr_text = None
+                if 'Extracted text:' in message_text:
+                    ocr_part = message_text.split('Extracted text:', 1)[1]
+                    # Stop at 'Detected amount:' if present (that's our appended summary)
+                    if 'Detected amount:' in ocr_part:
+                        ocr_part = ocr_part.split('Detected amount:', 1)[0]
+                    extracted_ocr_text = ocr_part.strip()
             
             # Create receipt object
             new_receipt = {
@@ -1352,6 +1361,7 @@ Or type:
                 'ocr_amount': extracted_amount or 0,
                 'vendor': extracted_vendor or 'Unknown',
                 'date': extracted_date,
+                'ocr_raw_text': extracted_ocr_text,
                 'message_id': media_info.get('message_id'),
                 'file_size': media_info.get('file_size'),
                 'mimetype': media_info.get('mimetype'),
@@ -1494,9 +1504,9 @@ Or type:
                                 file_type=receipt.get('mimetype'),
                                 file_size=receipt.get('file_size'),
                                 ocr_amount=receipt.get('ocr_amount'),
-                                ocr_raw_text=None,  # Not storing full OCR text for now
+                                ocr_raw_text=receipt.get('ocr_raw_text'),  # Full Textract OCR text
                                 message_id=receipt.get('message_id'),
-                                vendor=receipt.get('vendor'),  # Add vendor from receipt
+                                vendor=receipt.get('vendor'),
                                 file_hash=file_hash
                             )
                             print(f"✅ Receipt #{i} saved to database")

@@ -397,6 +397,125 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                       </div>
                     )}
                   </dl>
+
+                  {/* Extracted OCR Data from receipts */}
+                  {!loading && receipts.length > 0 && receipts.some(r => r.vendor || r.ocr_amount || r.ocr_raw_text) && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1">
+                        <span>🔍</span> Extracted Data
+                      </h4>
+                      <div className="space-y-3">
+                        {receipts.map((receipt, idx) => {
+                          const hasData = receipt.vendor || receipt.ocr_amount || receipt.ocr_raw_text;
+                          if (!hasData) return null;
+
+                          // Map Textract raw field names → friendly display labels + icons
+                          const FIELD_MAP: Record<string, { label: string; icon: string }> = {
+                            // Vendor
+                            'vendor_name': { label: 'Vendor', icon: '🏪' },
+                            'vendor': { label: 'Vendor', icon: '🏪' },
+                            'name': { label: 'Vendor', icon: '🏪' },
+                            // Date
+                            'invoice_receipt_date': { label: 'Date', icon: '📅' },
+                            'date': { label: 'Date', icon: '📅' },
+                            'order_date': { label: 'Order Date', icon: '📅' },
+                            // Invoice ID
+                            'invoice_receipt_id': { label: 'Invoice ID', icon: '🔢' },
+                            'invoice id': { label: 'Invoice ID', icon: '🔢' },
+                            'receiver_vat_number': { label: 'VAT Number', icon: '🔢' },
+                            // Amounts
+                            'total': { label: 'Total', icon: '💰' },
+                            'amount_due': { label: 'Amount Due', icon: '💰' },
+                            'amount_paid': { label: 'Amount Paid', icon: '💰' },
+                            'subtotal': { label: 'Subtotal', icon: '🧮' },
+                            // Tax
+                            'tax': { label: 'Tax', icon: '📊' },
+                            'tax_payer_id': { label: 'Tax ID', icon: '📊' },
+                            // Other common fields
+                            'due_date': { label: 'Due Date', icon: '📅' },
+                            'po_number': { label: 'PO Number', icon: '🔢' },
+                            'account_number': { label: 'Account No.', icon: '🔢' },
+                            'payment_terms': { label: 'Payment Terms', icon: '📋' },
+                            'service_charge': { label: 'Service Charge', icon: '🧮' },
+                            'discount': { label: 'Discount', icon: '🏷️' },
+                            'gratuity': { label: 'Gratuity', icon: '🧮' },
+                          };
+
+                          // Parse ocr_raw_text into structured key-value pairs
+                          const parsedFields: { label: string; icon: string; value: string }[] = [];
+                          const seenLabels = new Set<string>();
+
+                          if (receipt.ocr_raw_text) {
+                            const lines = receipt.ocr_raw_text.trim().split('\n');
+                            for (const line of lines) {
+                              const trimmed = line.trim();
+                              if (!trimmed || trimmed === '---') continue;
+                              const colonIdx = trimmed.indexOf(':');
+                              if (colonIdx > 0 && colonIdx < trimmed.length - 1) {
+                                const rawKey = trimmed.slice(0, colonIdx).trim();
+                                const value = trimmed.slice(colonIdx + 1).trim();
+                                if (!rawKey || !value) continue;
+
+                                // Look up in field map (try lowercase key)
+                                const mapped = FIELD_MAP[rawKey.toLowerCase()] || { label: rawKey, icon: '•' };
+                                if (!seenLabels.has(mapped.label.toLowerCase())) {
+                                  seenLabels.add(mapped.label.toLowerCase());
+                                  parsedFields.push({ label: mapped.label, icon: mapped.icon, value });
+                                }
+                              }
+                            }
+                          }
+
+                          // Fallback: if no parsed fields, build from dedicated columns
+                          if (parsedFields.length === 0) {
+                            if (receipt.vendor) {
+                              parsedFields.push({ label: 'Vendor', icon: '🏪', value: receipt.vendor });
+                            }
+                            if (receipt.ocr_amount) {
+                              parsedFields.push({ label: 'Total', icon: '💰', value: formatCurrency(receipt.ocr_amount) });
+                            }
+                          }
+
+                          return (
+                            <div key={receipt.id} className="bg-white border border-gray-200 rounded-lg overflow-hidden text-xs">
+                              {/* Receipt header */}
+                              <div className="flex items-center justify-between px-3 py-2 bg-gray-100 border-b border-gray-200">
+                                <span className="font-semibold text-gray-600 uppercase tracking-wide text-[10px]">
+                                  {isImageFile(receipt) ? '🧾' : '📄'} {receipts.length > 1 ? `Receipt ${idx + 1}` : 'Receipt'}
+                                </span>
+                                {receipt.ocr_amount && (
+                                  <span className="bg-green-100 text-green-800 font-bold px-2 py-0.5 rounded-full">
+                                    {formatCurrency(receipt.ocr_amount)}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Parsed fields */}
+                              {parsedFields.length > 0 ? (
+                                <dl className="divide-y divide-gray-100">
+                                  {parsedFields.map((field, i) => (
+                                    <div key={i} className="flex justify-between items-start px-3 py-1.5 gap-2">
+                                      <dt className="text-gray-500 flex items-center gap-1 shrink-0">
+                                        <span>{field.icon}</span>
+                                        {field.label}
+                                      </dt>
+                                      <dd className="font-medium text-gray-800 text-right break-words max-w-[55%]">
+                                        {field.value}
+                                      </dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              ) : (
+                                <div className="px-3 py-3 text-gray-400 text-center italic text-[10px]">
+                                  No data extracted from this receipt
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Status & Date */}

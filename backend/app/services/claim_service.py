@@ -330,16 +330,20 @@ class ClaimService(BaseService):
                 result = await extract_expense_from_image(content)
                 if result and result.get('success'):
                     extracted = result.get('expense', {})
-                    ocr_amount = float(extracted.get('total', 0))
+                    ocr_amount = float(extracted.get('total', 0) or 0)
                     ocr_vendor = extracted.get('vendorName', '')
                     ocr_date = extracted.get('date', '')
                     ocr_invoice_id = extracted.get('invoiceId', '')
+                    
+                    # Use the Textract-generated text directly — it already contains
+                    # ALL summary fields as "Label: Value" lines (vendor, date, total,
+                    # invoice ID, subtotal, tax, etc.) ready for the frontend to parse.
                     ocr_text = result.get('text', '')
                     
                     if ocr_amount > 0:
                         total_extracted += ocr_amount
             except Exception as e:
-                print(f"❌ OCR failed for {filename}: {e}")
+                print(f"OCR failed for {filename}: {e}")
             
             # 3. Calculate OCR Content Fingerprint for Duplicate Detection
             # Uses extracted data, not raw bytes (invariant to re-compression)

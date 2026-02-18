@@ -239,7 +239,7 @@ class ClaimController(BaseController):
             )
             
             # Update claim with extracted total if user didn't provide amount
-            if result['total_extracted'] > 0 and not user_amount:
+            if result.get('total_extracted', 0) > 0 and not user_amount:
                 print(f"🔄 Updating claim {claim.id} with total OCR amount: {result['total_extracted']}")
                 from app.models.claim import Claim as ClaimModel
                 await ClaimModel.update(claim.id, {'system_amount': result['total_extracted']})
@@ -248,13 +248,17 @@ class ClaimController(BaseController):
                 refreshed_claim = await ClaimModel.find_by_id(claim.id)
                 if refreshed_claim:
                     claim = refreshed_claim
+                    
+            warnings = result.get('warnings', [])
+        else:
+            warnings = []
         
         # Notify manager
         try:
             claim_dict = claim.to_dict()
             claim_dict['employee_name'] = employee.name
             claim_dict['employee_code'] = employee.employee_code
-            await notify_manager_of_new_claim(claim_dict)
+            await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
         except Exception as e:
             print(f"⚠️ Failed to notify manager: {e}")
         
@@ -339,6 +343,7 @@ class ClaimController(BaseController):
         )
         
         # Save quotations as receipts
+        warnings = []
         if quotation_data:
             result = await service.process_and_save_receipts(
                 claim_id=claim.id,
@@ -347,13 +352,14 @@ class ClaimController(BaseController):
                 organization_id=auth.get('organization_id')
             )
             print(f"✅ Saved {len(quotation_data)} quotations for advance claim {claim.id}")
+            warnings = result.get('warnings', [])
         
         # Notify manager
         try:
             claim_dict = claim.to_dict()
             claim_dict['employee_name'] = employee.name
             claim_dict['employee_code'] = employee.employee_code
-            await notify_manager_of_new_claim(claim_dict)
+            await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
         except Exception as e:
             print(f"⚠️ Failed to notify manager: {e}")
         

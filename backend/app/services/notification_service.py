@@ -318,7 +318,7 @@ async def notify_manager_of_appeal(claim: dict, notes: str = None) -> bool:
         return False
 
 
-async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> bool:
+async def notify_manager_of_new_claim(claim: dict, media_info: dict = None, duplicate_warnings: list = None) -> bool:
     """
     Notify manager of a new claim submission, optionally forwarding the receipt/document
     
@@ -436,6 +436,13 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         is_advance = full_claim.get('claim_type') == 'advance'
         claim_type_label = "💼 Type: Before Pay (Advance)" if is_advance else "💼 Type: After Pay (Reimbursement)"
         
+        # Build duplicate warning section
+        duplicate_section = ""
+        if duplicate_warnings:
+             duplicate_section = "\n\n⚠️ *POSSIBLE DUPLICATE INVOICE*"
+             for warning in duplicate_warnings:
+                 duplicate_section += f"\n{warning.get('message')}"
+        
         # Build the notification message
         message = f"""🔔 *New Claim Submitted*
 
@@ -445,7 +452,7 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
 📁 Category: {full_claim.get('category_name', 'N/A')}
 📍 Location: {full_claim.get('location_name', 'N/A')}
 💵 Amount: {format_currency(amount)}
-📝 Details: {full_claim.get('description', 'N/A')[:100]}{receipt_section}
+📝 Details: {(full_claim.get('description') or 'N/A')[:100]}{receipt_section}{duplicate_section}
 
 ━━━━━━━━━━━━━━━━━━━━
 *Reply with one of:*
@@ -487,5 +494,7 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None) -> b
         return True
         
     except Exception as e:
+        import traceback
         print(f"❌ Error notifying manager of new claim: {e}")
+        traceback.print_exc()
         return False

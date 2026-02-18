@@ -136,6 +136,9 @@ async def handle_message_event(payload: dict):
             }
             print(f"📎 Media attached: {mimetype}")
 
+        # Calculate hash if we have data or URL (will extract bytes next)
+        file_hash = None
+
         if (media_url or media_data) and 'image' in mimetype:
             print("🔍 Processing receipt media...")
             await waha_client.send_text(chat_id, "🔍 Analyzing receipt...")
@@ -170,6 +173,12 @@ async def handle_message_event(payload: dict):
                             image_bytes = resp.content
                         else:
                             print(f"❌ Failed to download media: {resp.status_code}")
+                            
+                # Calculate Hash if bytes available
+                if image_bytes:
+                    # We'll compute OCR-based hash later after extraction
+                    pass
+                        
             except Exception as e:
                 print(f"❌ Error getting media bytes: {e}")
 
@@ -227,6 +236,24 @@ async def handle_message_event(payload: dict):
                 
                 vendor = expense.get('vendorName', '')
                 date_str = expense.get('date', '')
+                invoice_id = expense.get('invoiceId', '')
+                
+                # ===== OCR CONTENT FINGERPRINT =====
+                # Hash based on extracted invoice data, not raw image bytes
+                # This is invariant to WhatsApp re-compression
+                import hashlib
+                fingerprint_parts = [
+                    (vendor or '').strip().lower(),
+                    str(amount or '').strip(),
+                    (date_str or '').strip(),
+                    str(invoice_id or '').strip()
+                ]
+                fingerprint_str = '|'.join(fingerprint_parts)
+                if any(fingerprint_parts):  # Only hash if we extracted something
+                    file_hash = hashlib.sha256(fingerprint_str.encode()).hexdigest()
+                    print(f"🔑 Content fingerprint: {fingerprint_str} -> {file_hash[:16]}...")
+                    if media_info:
+                        media_info['file_hash'] = file_hash
                 
                 # Append to existing text (caption) or start fresh
                 text_content = (payload.get("body") or payload.get("text") or "").strip()

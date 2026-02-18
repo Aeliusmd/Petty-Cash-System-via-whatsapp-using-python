@@ -429,16 +429,63 @@ class Claim(BaseModel):
         ocr_amount: float = None,
         ocr_raw_text: str = None,
         message_id: str = None,
-        vendor: str = None
+        vendor: str = None,
+        file_hash: str = None
     ) -> Dict[str, Any]:
         """Add a receipt/attachment to a claim"""
-        result = await db.query("""
+        params = [claim_id, file_path, file_name, file_type, file_size, ocr_amount, ocr_raw_text, message_id, vendor]
+        query = """
             INSERT INTO claim_receipts (claim_id, file_path, file_name, file_type, 
-                                       file_size, ocr_amount, ocr_raw_text, message_id, vendor)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
-        """, claim_id, file_path, file_name, file_type, file_size, ocr_amount, ocr_raw_text, message_id, vendor)
+                                       file_size, ocr_amount, ocr_raw_text, message_id, vendor
+        """
+        
+        if file_hash:
+            query += ", file_hash"
+            params.append(file_hash)
+            
+        query += ") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9"
+        
+        if file_hash:
+            query += ", $10"
+            
+        query += ") RETURNING *"
+            
+        result = await db.query(query, *params)
         
         return result[0] if result else {}
+
+    @classmethod
+    async def check_duplicate_receipt(cls, file_hash: str, current_claim_id: int = None) -> Optional[Dict[str, Any]]:
+        """
+        Check if a receipt with the same hash already exists.
+        Returns details of the existing receipt if found, otherwise None.
+        """
+        if not file_hash:
+            return None
+            
+        query = """
+            SELECT cr.claim_id, c.created_at, c.claim_number, e.name as employee_name
+            FROM claim_receipts cr
+            JOIN claims c ON cr.claim_id = c.id
+            JOIN employees e ON c.employee_id = e.id
+            WHERE cr.file_hash = $1
+        """
+        
+        args = [file_hash]
+        
+        # Exclude current claim if provided (e.g. when updating)
+        if current_claim_id:
+            query += " AND cr.claim_id != $2"
+            args.append(current_claim_id)
+            
+        query += " LIMIT 1"
+        
+        # Use fetch_one directly from db instance (assuming it exists based on other calls)
+        # Note: Base model uses self.db but here it is a class method and db is imported globally usually
+        # Checking base.py, db is imported from app.db.database
+        from app.db.database import db
+        result = await db.query_one(query, *args)
+        return dict(result) if result else None
     
     @classmethod
     async def get_receipts(cls, claim_id: int) -> List[Dict[str, Any]]:
@@ -538,9 +585,12 @@ async def delete(claim_id: int):
 async def add_receipt(claim_id: int, file_path: str, file_name: str, 
                       file_type: str = None, file_size: int = None,
                       ocr_amount: float = None, ocr_raw_text: str = None,
-                      message_id: str = None, vendor: str = None):
+                      message_id: str = None, vendor: str = None, file_hash: str = None):
     return await Claim.add_receipt(claim_id, file_path, file_name, file_type, 
-                                   file_size, ocr_amount, ocr_raw_text, message_id, vendor)
+                                   file_size, ocr_amount, ocr_raw_text, message_id, vendor, file_hash)
+
+async def check_duplicate_receipt(file_hash: str, current_claim_id: int = None):
+    return await Claim.check_duplicate_receipt(file_hash, current_claim_id)
 
 async def get_receipts(claim_id: int):
     return await Claim.get_receipts(claim_id)

@@ -10,6 +10,10 @@ from app.services.base import BaseService
 from app.services.audit_service import AuditService
 from app.models.claim import Claim
 from app.models.employee import Employee
+import uuid
+import hashlib
+from pathlib import Path
+from app.services.textract_service import extract_expense_from_image
 
 
 class ClaimService(BaseService):
@@ -271,6 +275,8 @@ class ClaimService(BaseService):
         
         total_extracted = 0.0
         receipts_saved = []
+        warnings = []
+        saved_count = 0
         
         # 1. Get receipts directory (handle both local and Docker environments)
         possible_paths = [
@@ -293,66 +299,89 @@ class ClaimService(BaseService):
         for receipt_data in receipt_files:
             content = receipt_data['bytes']
             filename = receipt_data.get('filename', 'receipt')
-            content_type = receipt_data.get('content_type', 'image/jpeg')
+            content = receipt_data.get('bytes')
+            filename = receipt_data.get('filename')
+            content_type = receipt_data.get('content_type')
             
-            # 2. Save file (flat structure, no subdirectories)
-            ext = Path(filename).suffix or '.jpg'
-            saved_filename = f"{uuid.uuid4()}{ext}"
+            if not content:
+                continue
+                
+            # 1. Save to disk
+            ext = filename.split('.')[-1] if '.' in filename else 'jpg'
+            saved_filename = f"{uuid.uuid4()}.{ext}"
             file_path = receipts_dir / saved_filename
             
-            # Write file synchronously (in async context)
-            import asyncio
-            await asyncio.to_thread(file_path.write_bytes, content)
+            with open(file_path, "wb") as f:
+                f.write(content)
             
-            # 3. Extract OCR
-            ocr_amount = None
-            ocr_vendor = None
-            ocr_text = None
+            # 2. Perform OCR / Extraction
+            ocr_amount = 0.0
+            ocr_text = ""
+            ocr_vendor = ""
+            ocr_date = ""
+            ocr_invoice_id = ""
             
             try:
-                print(f"🔍 Extracting data from receipt: {filename}")
-                extraction = await textract_service.extract_expense_from_image(content)
-                if extraction.get('success'):
-                    expense = extraction.get('expense', {})
+                # Use textract service
+                result = await extract_expense_from_image(content)
+                if result and result.get('success'):
+                    extracted = result.get('expense', {})
+                    ocr_amount = float(extracted.get('total', 0))
+                    ocr_vendor = extracted.get('vendorName', '')
+                    ocr_date = extracted.get('date', '')
+                    ocr_invoice_id = extracted.get('invoiceId', '')
+                    ocr_text = result.get('text', '')
                     
-                    # Parse amount
-                    raw_total = expense.get('total')
-                    if raw_total:
-                        clean_total = str(raw_total).replace(',', '').replace(' ', '')
-                        try:
-                            ocr_amount = float(clean_total)
-                            total_extracted += ocr_amount
-                            print(f"✅ Extracted: Rs. {ocr_amount}")
-                        except ValueError:
-                            print(f"⚠️ Could not parse amount: {raw_total}")
-                    
-                    ocr_vendor = expense.get('vendorName')
-                    ocr_text = extraction.get('text')
+                    if ocr_amount > 0:
+                        total_extracted += ocr_amount
             except Exception as e:
-                print(f"⚠️ Extraction failed: {e}")
+                print(f"❌ OCR failed for {filename}: {e}")
+            
+            # 3. Calculate OCR Content Fingerprint for Duplicate Detection
+            # Uses extracted data, not raw bytes (invariant to re-compression)
+            file_hash = None
+            fingerprint_parts = [
+                (ocr_vendor or '').strip().lower(),
+                str(ocr_amount or '').strip(),
+                (ocr_date or '').strip(),
+                str(ocr_invoice_id or '').strip()
+            ]
+            fingerprint_str = '|'.join(fingerprint_parts)
+            if any(fingerprint_parts):
+                file_hash = hashlib.sha256(fingerprint_str.encode()).hexdigest()
+                print(f"🔑 Content fingerprint: {fingerprint_str} -> {file_hash[:16]}...")
+            
+            # Check for duplicates
+            if file_hash:
+                duplicate = await Claim.check_duplicate_receipt(file_hash, current_claim_id=claim_id)
+                if duplicate:
+                    print(f"⚠️ Duplicate receipt detected! Used in claim #{duplicate.get('claim_number')}")
+                    warnings.append({
+                        'type': 'duplicate',
+                        'message': f"Potential duplicate: Used in Claim #{duplicate.get('claim_number')} by {duplicate.get('employee_name')} on {duplicate.get('created_at').strftime('%Y-%m-%d') if duplicate.get('created_at') else 'unknown date'}",
+                        'original_claim': duplicate
+                    })
             
             # 4. Save to database
-            receipt_record = await self.add_receipt(
+            receipt_record = await Claim.add_receipt(
                 claim_id=claim_id,
-                file_path=saved_filename,  # Store only filename, not full path
+                file_path=saved_filename,
                 file_name=filename,
                 file_type=content_type,
                 file_size=len(content),
                 ocr_amount=ocr_amount,
                 ocr_raw_text=ocr_text,
                 vendor=ocr_vendor,
-                uploaded_by=employee_id,
-                organization_id=organization_id
+                file_hash=file_hash
             )
             
-            receipts_saved.append(receipt_record)
-        
-        print(f"📊 Total extracted from {len(receipts_saved)} receipts: Rs. {total_extracted}")
-        
+            if receipt_record:
+                saved_count += 1
+                
         return {
-            'receipts_saved': len(receipts_saved),
-            'total_extracted': total_extracted,
-            'receipts': receipts_saved
+            "total_extracted": total_extracted,
+            "receipt_count": saved_count,
+            "warnings": warnings
         }
     
     async def delete_claim(

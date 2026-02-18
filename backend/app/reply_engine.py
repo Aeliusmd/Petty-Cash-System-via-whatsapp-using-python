@@ -814,7 +814,8 @@ Type *skip* to proceed without quotations."""
                 'ocr_amount': extracted_amount or 0,
                 'vendor': extracted_vendor,
                 'file_type': media_info.get('mimetype'),
-                'message_id': media_info.get('message_id')
+                'message_id': media_info.get('message_id'),
+                'file_hash': media_info.get('file_hash')
              }
              
              # Save to list of receipts (quotations)
@@ -873,6 +874,18 @@ Type *skip* to proceed without quotations."""
                 media_info_list = []
                 
                 for r in receipts:
+                    # Check for duplicates using file_hash
+                    file_hash = r.get('file_hash')
+                    if file_hash:
+                        duplicate = await claim_model.check_duplicate_receipt(file_hash, current_claim_id=claim['id'])
+                        if duplicate:
+                            print(f"⚠️ Duplicate receipt detected! Used in claim #{duplicate.get('claim_number')}")
+                            r['warning'] = {
+                                'type': 'duplicate',
+                                'message': f"Potential duplicate: Used in Claim #{duplicate.get('claim_number')} by {duplicate.get('employee_name')} on {duplicate.get('created_at').strftime('%Y-%m-%d') if duplicate.get('created_at') else 'unknown date'}",
+                                'original_claim': duplicate
+                            }
+                    
                     await claim_model.add_receipt(
                         claim_id=claim['id'],
                         file_path=r.get('file_path'),
@@ -880,17 +893,20 @@ Type *skip* to proceed without quotations."""
                         file_type=r.get('file_type'),
                         ocr_amount=r.get('ocr_amount', 0),
                         message_id=r.get('message_id'),
-                        vendor=r.get('vendor')  # Add vendor from quotation
+                        vendor=r.get('vendor'),
+                        file_hash=file_hash
                     )
                     media_info_list.append({
                          'saved_filename': r.get('file_path'),
-                         'mimetype': r.get('file_type')
+                         'mimetype': r.get('file_type'),
+                         'warning': r.get('warning')
                     })
                 
                 # Notifications
                 from app.services import notification_service
                 if employee.get('manager_id'):
-                    await notification_service.notify_manager_of_new_claim(claim, media_info_list)
+                    duplicate_warnings = [item['warning'] for item in media_info_list if item.get('warning')]
+                    await notification_service.notify_manager_of_new_claim(claim, media_info_list, duplicate_warnings=duplicate_warnings)
                 
                 await conversation_model.reset(chat_id)
                 
@@ -1334,7 +1350,8 @@ Or type:
                 'date': extracted_date,
                 'message_id': media_info.get('message_id'),
                 'file_size': media_info.get('file_size'),
-                'mimetype': media_info.get('mimetype')
+                'mimetype': media_info.get('mimetype'),
+                'file_hash': media_info.get('file_hash')
             }
             
             # ATOMIC: Add receipt to conversation (prevents race conditions)
@@ -1440,6 +1457,32 @@ Or type:
                     print(f"💾 Saving {len(receipts)} receipt(s) to database for claim {claim['id']}")
                     for i, receipt in enumerate(receipts, 1):
                         try:
+                            # Check for duplicates
+                            file_hash = receipt.get('file_hash')
+                            duplicate = await claim_model.check_duplicate_receipt(file_hash, current_claim_id=claim['id'])
+                            
+                            is_duplicate = False
+                            if duplicate:
+                                print(f"⚠️ Duplicate receipt detected! Used in claim #{duplicate.get('claim_number')}")
+                                is_duplicate = True
+                                media_info_list.append({
+                                    'saved_filename': receipt.get('file_path'),
+                                    'message_id': receipt.get('message_id'),
+                                    'mimetype': receipt.get('mimetype'),
+                                    'warning': {
+                                        'type': 'duplicate',
+                                        'message': f"Potential duplicate: Used in Claim #{duplicate.get('claim_number')} by {duplicate.get('employee_name')} on {duplicate.get('created_at').strftime('%Y-%m-%d') if duplicate.get('created_at') else 'unknown date'}",
+                                        'original_claim': duplicate
+                                    }
+                                })
+                            else:
+                                # Build media_info for manager notification (no warning)
+                                media_info_list.append({
+                                    'saved_filename': receipt.get('file_path'),
+                                    'message_id': receipt.get('message_id'),
+                                    'mimetype': receipt.get('mimetype')
+                                })
+
                             await claim_model.add_receipt(
                                 claim_id=claim['id'],
                                 file_path=receipt.get('file_path'),
@@ -1449,24 +1492,34 @@ Or type:
                                 ocr_amount=receipt.get('ocr_amount'),
                                 ocr_raw_text=None,  # Not storing full OCR text for now
                                 message_id=receipt.get('message_id'),
-                                vendor=receipt.get('vendor')  # Add vendor from receipt
+                                vendor=receipt.get('vendor'),  # Add vendor from receipt
+                                file_hash=file_hash
                             )
                             print(f"✅ Receipt #{i} saved to database")
                             
-                            # Build media_info for manager notification
-                            media_info_list.append({
-                                'saved_filename': receipt.get('file_path'),
-                                'message_id': receipt.get('message_id'),
-                                'mimetype': receipt.get('mimetype')
-                            })
                         except Exception as receipt_error:
                             print(f"⚠️ Failed to save receipt #{i}: {receipt_error}")
                 else:
                     # Backwards compatibility: Check for old single-receipt format
                     stored_media_info = context.get('media_info')
+                    print(f"🔍 DEBUG legacy path: stored_media_info keys={list(stored_media_info.keys()) if stored_media_info else None}")
                     if stored_media_info and stored_media_info.get('saved_filename'):
                         try:
                             print(f"💾 Saving single receipt (legacy) to database for claim {claim['id']}")
+                            
+                            # Check for duplicates using file_hash
+                            file_hash = stored_media_info.get('file_hash')
+                            print(f"🔑 Legacy path file_hash: {file_hash[:16] if file_hash else None}")
+                            if file_hash:
+                                duplicate = await claim_model.check_duplicate_receipt(file_hash, current_claim_id=claim['id'])
+                                if duplicate:
+                                    print(f"⚠️ Duplicate receipt detected! Used in claim #{duplicate.get('claim_number')}")
+                                    stored_media_info['warning'] = {
+                                        'type': 'duplicate',
+                                        'message': f"Potential duplicate: Used in Claim #{duplicate.get('claim_number')} by {duplicate.get('employee_name')} on {duplicate.get('created_at').strftime('%Y-%m-%d') if duplicate.get('created_at') else 'unknown date'}",
+                                        'original_claim': duplicate
+                                    }
+                            
                             await claim_model.add_receipt(
                                 claim_id=claim['id'],
                                 file_path=stored_media_info.get('saved_filename'),
@@ -1476,19 +1529,24 @@ Or type:
                                 ocr_amount=stored_media_info.get('extracted_amount'),
                                 ocr_raw_text=stored_media_info.get('ocr_text'),
                                 message_id=stored_media_info.get('message_id'),
-                                vendor=stored_media_info.get('vendor') or context.get('receipt_vendor')  # Add vendor from legacy path or context
+                                vendor=stored_media_info.get('vendor') or context.get('receipt_vendor'),
+                                file_hash=file_hash
                             )
                             media_info_list.append(stored_media_info)
                             print(f"✅ Receipt saved to database successfully")
                         except Exception as receipt_error:
                             print(f"⚠️ Failed to save receipt to database: {receipt_error}")
+                    else:
+                        print(f"⚠️ No media_info found in context - receipt NOT saved!")
                 
                 
                 # Notify manager with claim details and receipt
                 print(f"🔍 DEBUG: employee.manager_id={employee.get('manager_id')}, manager_name={employee.get('manager_name')}")
                 if employee.get('manager_id'):
                     print(f"📤 Sending notification to manager ID: {employee.get('manager_id')}")
-                    await notification_service.notify_manager_of_new_claim(claim, media_info_list)
+                    # Extract duplicate warnings from media_info_list
+                    duplicate_warnings = [item['warning'] for item in media_info_list if item.get('warning')]
+                    await notification_service.notify_manager_of_new_claim(claim, media_info_list, duplicate_warnings=duplicate_warnings)
                 else:
                     print(f"⚠️ No manager assigned to employee {employee['name']} - skipping manager notification")
 

@@ -25,6 +25,9 @@ interface Employee {
   unit_name: string | null;
   manager_id: number | null;
   manager_name: string | null;
+  spending_limit: number | null;
+  spending_limit_period: string | null;
+  spending_limit_custom_days: number | null;
 }
 
 interface Grade { id: number; code: string; name: string; }
@@ -66,6 +69,9 @@ export default function EmployeesPage() {
     unit_id: '',
     manager_id: '',
     role: 'employee',
+    spending_limit: '',
+    spending_limit_period: 'monthly',
+    spending_limit_custom_days: '',
   });
 
   // Permission-based access
@@ -149,6 +155,9 @@ export default function EmployeesPage() {
       unit_id: '',
       manager_id: '',
       role: 'employee',
+      spending_limit: '',
+      spending_limit_period: 'monthly',
+      spending_limit_custom_days: '',
     });
     setShowModal(true);
   }
@@ -165,6 +174,9 @@ export default function EmployeesPage() {
       unit_id: employee.unit_id?.toString() || '',
       manager_id: employee.manager_id?.toString() || '',
       role: employee.role,
+      spending_limit: employee.spending_limit?.toString() || '',
+      spending_limit_period: employee.spending_limit_period || 'monthly',
+      spending_limit_custom_days: employee.spending_limit_custom_days?.toString() || '',
     });
     setShowModal(true);
   }
@@ -180,6 +192,9 @@ export default function EmployeesPage() {
         location_id: formData.location_id ? parseInt(formData.location_id) : null,
         unit_id: formData.unit_id ? parseInt(formData.unit_id) : null,
         manager_id: formData.manager_id ? parseInt(formData.manager_id) : null,
+        spending_limit: formData.spending_limit ? parseFloat(formData.spending_limit) : null,
+        spending_limit_period: formData.spending_limit || formData.spending_limit !== '' ? formData.spending_limit_period : 'monthly',
+        spending_limit_custom_days: formData.spending_limit_custom_days ? parseInt(formData.spending_limit_custom_days) : null,
       };
 
       const url = editingEmployee 
@@ -316,6 +331,7 @@ export default function EmployeesPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Role</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Grade</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Location</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Spending Limit</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-900 uppercase">Actions</th>
               </tr>
@@ -337,6 +353,20 @@ export default function EmployeesPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-900">{employee.grade_code || '-'}</td>
                   <td className="px-4 py-3 text-gray-900">{employee.location_name || '-'}</td>
+                  <td className="px-4 py-3 text-gray-900 text-sm">
+                    {employee.spending_limit != null ? (
+                      <span>
+                        <span className="font-medium">Rs {Number(employee.spending_limit).toLocaleString()}</span>
+                        <span className="text-gray-500 text-xs block">
+                          / {employee.spending_limit_period === 'custom' && employee.spending_limit_custom_days
+                              ? `${employee.spending_limit_custom_days} days`
+                              : employee.spending_limit_period || 'month'}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 italic">Unlimited</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                       employee.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -372,7 +402,7 @@ export default function EmployeesPage() {
               ))}
               {paginatedEmployees.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-900">
+                   <td colSpan={9} className="px-4 py-8 text-center text-gray-900">
                     No employees found
                   </td>
                 </tr>
@@ -579,6 +609,57 @@ export default function EmployeesPage() {
                       <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Spending Limit Section */}
+                <div className="border-t pt-4 mt-2">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">💰 Spending Limit</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        Limit Amount
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.spending_limit}
+                        onChange={(e) => setFormData({...formData, spending_limit: e.target.value})}
+                        placeholder="Leave empty for unlimited"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white placeholder-gray-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        Period
+                      </label>
+                      <select
+                        value={formData.spending_limit_period}
+                        onChange={(e) => setFormData({...formData, spending_limit_period: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white"
+                      >
+                        <option value="daily">Daily (1 Day)</option>
+                        <option value="weekly">Weekly (7 Days)</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="custom">Custom Days</option>
+                      </select>
+                    </div>
+                  </div>
+                  {formData.spending_limit_period === 'custom' && (
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        Custom Period (Days)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={formData.spending_limit_custom_days}
+                        onChange={(e) => setFormData({...formData, spending_limit_custom_days: e.target.value})}
+                        placeholder="e.g. 14"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-gray-900 bg-white placeholder-gray-400"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-4 pt-4">

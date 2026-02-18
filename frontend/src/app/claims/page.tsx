@@ -13,6 +13,7 @@ import { authenticatedFetch } from '@/utils/api';
 interface Claim {
   id: number;
   claim_number: string;
+  employee_id: number;
   employee_name: string;
   employee_code: string;
   category_name: string;
@@ -104,6 +105,12 @@ function ClaimsContent() {
   
   // Modal state
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
+  
+  // Warning Modal State
+  const [showWarning, setShowWarning] = useState(false);
+  const [warningClaim, setWarningClaim] = useState<Claim | null>(null);
+  const [warningSummary, setWarningSummary] = useState<any>(null);
+  const [processingApprove, setProcessingApprove] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   // Employee search autocomplete states
@@ -216,23 +223,71 @@ function ClaimsContent() {
     }
   }
 
-  async function handleApprove(claimId: number) {
-    if (!confirm('Are you sure you want to approve this claim?')) return;
-    
+  async function handleApprove(claimId: number, finalAmount?: number, skipCheck = false) {
+    // Find claim
+    const claim = claims.find(c => c.id === claimId);
+    if (!claim) return;
+
+    // Phase 1: Check Spending Limit (unless skipped)
+    if (!skipCheck && !finalAmount) {
+      setProcessing(claimId);
+      try {
+        // Fetch spending summary
+        const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/spending-summary/${claim.employee_id}`);
+        if (res.ok) {
+          const data = await res.json();
+          const summary = data.data || data;
+          
+          if (summary.spending_limit) {
+             const claimAmount = claim.final_amount || claim.system_amount || claim.user_amount || 0;
+             const projectedTotal = (summary.total_spent || 0) + claimAmount;
+             
+             // If exceeds available (or limit), show warning
+             // total_spent includes approved claims. This claim is pending, so add its amount.
+             if (projectedTotal > summary.spending_limit) {
+               setWarningClaim(claim);
+               setWarningSummary(summary);
+               setShowWarning(true);
+               setProcessing(null);
+               return; // Stop here, wait for modal interaction
+             }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check spending limit:', err);
+        // Continue to normal approve if check fails (fail open or closed? let's fail open but log)
+      }
+    }
+
+    // Phase 2: Confirm & Execute
+    if (!skipCheck && !confirm('Are you sure you want to approve this claim?')) {
+      setProcessing(null);
+      return;
+    }
+  
     setProcessing(claimId);
     try {
+      const body = finalAmount ? { final_amount: finalAmount } : {};
       const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/${claimId}/approve`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json' 
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       });
+
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || 'Failed to approve');
       }
-      await fetchClaims();
+
+      await fetchClaims(true); // Silent refresh
+      
+      // Close warning if open
+      setShowWarning(false);
+      setWarningClaim(null);
+      setWarningSummary(null);
+      
       alert('Claim approved! Staff has been notified via WhatsApp.');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to approve claim');
@@ -517,6 +572,83 @@ function ClaimsContent() {
           isOpen={isModalOpen}
           onClose={() => { setIsModalOpen(false); setSelectedClaim(null); }}
         />
+      )}
+      {/* Spending Limit Warning Modal */}
+      {showWarning && warningClaim && warningSummary && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-start gap-4 mb-6">
+              <div className="bg-yellow-100 p-3 rounded-full">
+                <span className="text-2xl">⚠️</span>
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Spending Limit Exceeded</h3>
+                <p className="text-gray-600 mt-1">
+                  This claim exceeds the employee's available budget.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4 mb-6 space-y-3 text-sm">
+               <div className="flex justify-between">
+                 <span className="text-gray-600">Employee:</span>
+                 <span className="font-medium text-gray-900">{warningClaim.employee_name}</span>
+               </div>
+               <div className="flex justify-between">
+                 <span className="text-gray-600">Period ({warningSummary.period_label}):</span>
+                 <span className="font-medium text-gray-900">
+                   {formatCurrency(warningSummary.total_spent)} / {formatCurrency(warningSummary.spending_limit)}
+                 </span>
+               </div>
+               <div className="flex justify-between border-t pt-2">
+                 <span className="text-gray-800 font-semibold">Available Budget:</span>
+                 <span className="font-bold text-green-600">{formatCurrency(warningSummary.available)}</span>
+               </div>
+               <div className="flex justify-between">
+                 <span className="text-gray-800 font-semibold">Claim Amount:</span>
+                 <span className="font-bold text-red-600">
+                   {formatCurrency(warningClaim.final_amount || warningClaim.system_amount || warningClaim.user_amount)}
+                 </span>
+               </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => handleApprove(warningClaim.id, warningSummary.available, true)}
+                disabled={processing === warningClaim.id}
+                className="w-full py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+              >
+                Approve {formatCurrency(warningSummary.available)} (Available)
+              </button>
+              
+              <button
+                onClick={() => handleApprove(warningClaim.id, undefined, true)}
+                disabled={processing === warningClaim.id}
+                className="w-full py-2.5 bg-white border-2 border-orange-200 text-orange-700 font-medium rounded-lg hover:bg-orange-50 transition-colors"
+              >
+                Approve Full Amount (Override)
+              </button>
+              
+              <button
+                onClick={() => {
+                  setShowWarning(false);
+                  setRejectReason('Budget limit exceeded');
+                  setRejectingId(warningClaim.id);
+                }}
+                className="w-full py-2.5 text-red-600 font-medium hover:bg-red-50 rounded-lg transition-colors"
+              >
+                Reject Claim
+              </button>
+              
+              <button
+                onClick={() => setShowWarning(false)}
+                className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

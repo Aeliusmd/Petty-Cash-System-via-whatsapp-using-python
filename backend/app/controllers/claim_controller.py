@@ -36,6 +36,7 @@ class ClaimController(BaseController):
         self.router.get("/pending")(self.get_pending_claims)
         self.router.get("/stats")(self.get_claim_stats)
         self.router.get("/export")(self.export_claims)
+        self.router.get("/spending-summary/{employee_id}")(self.get_spending_summary)
         self.router.get("/{claim_id}")(self.get_claim)
         self.router.get("/{claim_id}/receipts")(self.get_claim_receipts)
         self.router.get("/{claim_id}/history")(self.get_claim_history)
@@ -455,7 +456,14 @@ class ClaimController(BaseController):
         except Exception as e:
             print(f"⚠️ Failed to notify staff: {e}")
         
-        return self.success_response(data=claim.to_dict(), message="Claim approved")
+        # Get spending summary after approval
+        from app.models.claim import Claim as ClaimModel
+        spending_summary = await ClaimModel.get_employee_spending_summary(claim.employee_id)
+        
+        response_data = claim.to_dict()
+        response_data['spending_summary'] = spending_summary
+        
+        return self.success_response(data=response_data, message="Claim approved")
     
     async def reject_claim(
         self,
@@ -563,6 +571,19 @@ class ClaimController(BaseController):
             raise HTTPException(status_code=404, detail="Claim not found")
         
         return self.success_response(message="Claim deleted successfully")
+    
+    async def get_spending_summary(
+        self,
+        employee_id: int,
+        request: Request,
+        auth: dict = Depends(require_authenticated)
+    ):
+        """Get spending summary for an employee"""
+        from app.models.claim import Claim as ClaimModel
+        summary = await ClaimModel.get_employee_spending_summary(employee_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        return self.success_response(data=summary)
 
 
 # Create controller instance and export router

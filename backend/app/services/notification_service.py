@@ -443,7 +443,56 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None, dupl
              for warning in duplicate_warnings:
                  duplicate_section += f"\n{warning.get('message')}"
         
+        # Check spending limit
+        try:
+            spending_summary = await claim_model.Claim.get_employee_spending_summary(claim['employee_id'])
+            if spending_summary and spending_summary.get('spending_limit'):
+                limit = float(spending_summary['spending_limit'])
+                available = float(spending_summary['available'])
+                current_amount = float(amount)
+                
+                if current_amount > available:
+                    deficit = current_amount - available
+                    message += f"\n\n⚠️ *SPENDING LIMIT EXCEEDED*"
+                    message += f"\nLimit: {format_currency(limit)}"
+                    message += f"\nAvailable: {format_currency(available)}"
+                    message += f"\nExceeds by: {format_currency(deficit)}"
+        except Exception as e:
+            print(f"Error checking spending limit for notification: {e}")
+
         # Build the notification message
+        final_message = f"""🔔 *New Claim Submitted*
+
+📋 Claim #: *{full_claim['claim_number']}*
+👤 Staff: {employee_name}
+{claim_type_label}
+📁 Category: {full_claim.get('category_name', 'N/A')}
+📍 Location: {full_claim.get('location_name', 'N/A')}
+💵 Amount: {format_currency(amount)}
+📝 Details: {(full_claim.get('description') or 'N/A')[:100]}{receipt_section}{duplicate_section}"""
+        
+        # Append spending warning if it exists (it was added to 'message' variable above, but I should use a separate variable to be clean)
+        # Actually in my replacement code above I appended to `message` but `message` wasn't defined yet!
+        # I need to restructure this block.
+        
+        # Redefining the block to be safer:
+        spending_warning = ""
+        try:
+            spending_summary = await claim_model.Claim.get_employee_spending_summary(claim['employee_id'])
+            if spending_summary and spending_summary.get('spending_limit'):
+                limit = float(spending_summary['spending_limit'])
+                available = float(spending_summary['available'])
+                current_amount = float(amount)
+                
+                if current_amount > available:
+                    deficit = current_amount - available
+                    spending_warning = f"\n\n⚠️ *SPENDING LIMIT EXCEEDED*"
+                    spending_warning += f"\nLimit: {format_currency(limit)}"
+                    spending_warning += f"\nAvailable: {format_currency(available)}"
+                    spending_warning += f"\nExceeds by: {format_currency(deficit)}"
+        except Exception as e:
+            print(f"Error checking spending limit for notification: {e}")
+
         message = f"""🔔 *New Claim Submitted*
 
 📋 Claim #: *{full_claim['claim_number']}*
@@ -452,7 +501,7 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None, dupl
 📁 Category: {full_claim.get('category_name', 'N/A')}
 📍 Location: {full_claim.get('location_name', 'N/A')}
 💵 Amount: {format_currency(amount)}
-📝 Details: {(full_claim.get('description') or 'N/A')[:100]}{receipt_section}{duplicate_section}
+📝 Details: {(full_claim.get('description') or 'N/A')[:100]}{receipt_section}{duplicate_section}{spending_warning}
 
 ━━━━━━━━━━━━━━━━━━━━
 *Reply with one of:*

@@ -21,6 +21,7 @@ interface Claim {
   claim_number: string;
   employee_name: string;
   employee_code: string;
+  employee_id: number;
   category_name: string;
   category_code: string;
   location_name: string | null;
@@ -88,6 +89,7 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [spendingSummary, setSpendingSummary] = useState<any>(null);
   
   // Appeal state
   const [showAppealForm, setShowAppealForm] = useState(false);
@@ -101,8 +103,26 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
   useEffect(() => {
     if (isOpen && claim) {
       fetchReceipts();
+      if (claim.status_code === 'PENDING') {
+        fetchSpendingSummary();
+      } else {
+        setSpendingSummary(null);
+      }
     }
   }, [isOpen, claim]);
+
+  async function fetchSpendingSummary() {
+    try {
+      if (!claim.employee_id) return;
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/claims/spending-summary/${claim.employee_id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSpendingSummary(data.data || data); // API returns { data: ... } or direct obj depending on implementation
+      }
+    } catch (err) {
+      console.error('Failed to fetch spending summary:', err);
+    }
+  }
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -319,6 +339,58 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
             <div className="p-6 space-y-6">
               {/* Claim Info Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Spending Limit / Budget Status (Only for Pending) */}
+                {spendingSummary && spendingSummary.spending_limit && (
+                   <div className="md:col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                     <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                       <span>📊</span> Budget Status ({spendingSummary.period_label})
+                     </h3>
+
+                     {(() => {
+                         const claimAmt = claim.final_amount || claim.system_amount || claim.user_amount || 0;
+                         const available = spendingSummary.available || 0;
+                         if (claimAmt > available) {
+                             const deficit = claimAmt - available;
+                             return (
+                                 <div className="mb-4 bg-red-100 border border-red-200 text-red-800 p-3 rounded-lg flex items-start gap-3 animate-pulse">
+                                     <span className="text-xl">⚠️</span>
+                                     <div>
+                                         <p className="font-bold">Spending Limit Exceeded</p>
+                                         <p className="text-sm">
+                                             This claim of {formatCurrency(claimAmt)} exceeds the available budget of {formatCurrency(available)} by <span className="font-bold">{formatCurrency(deficit)}</span>.
+                                         </p>
+                                     </div>
+                                 </div>
+                             );
+                         }
+                         return null;
+                     })()}
+                     <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <dt className="text-blue-700 text-xs uppercase tracking-wide font-semibold">Spending Limit</dt>
+                          <dd className="text-lg font-bold text-blue-900">{formatCurrency(spendingSummary.spending_limit)}</dd>
+                          <dd className="text-xs text-blue-600">
+                             {spendingSummary.spending_limit_period === 'custom' 
+                                ? `${spendingSummary.spending_limit_custom_days} days` 
+                                : spendingSummary.spending_limit_period}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-blue-700 text-xs uppercase tracking-wide font-semibold">Used</dt>
+                          <dd className="text-lg font-bold text-blue-900">{formatCurrency(spendingSummary.total_spent)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-blue-700 text-xs uppercase tracking-wide font-semibold">Available</dt>
+                          <dd className={`text-lg font-bold ${
+                            (spendingSummary.available || 0) < 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            {formatCurrency(spendingSummary.available)}
+                          </dd>
+                        </div>
+                     </div>
+                   </div>
+                )}
+
                 {/* Employee Info */}
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">

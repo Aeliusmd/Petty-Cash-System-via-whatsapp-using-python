@@ -4,6 +4,7 @@ import { useState } from 'react';
 interface Claim {
   id: number;
   claim_number: string;
+  employee_id: number;
   employee_name: string;
   employee_code: string;
   category_name: string;

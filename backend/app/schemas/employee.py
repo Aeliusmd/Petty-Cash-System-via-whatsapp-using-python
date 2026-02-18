@@ -20,6 +20,9 @@ class EmployeeBase(BaseModel):
     role: str = "staff"
     is_admin: bool = False
     is_manager: bool = False
+    spending_limit: Optional[float] = None
+    spending_limit_period: str = "monthly"
+    spending_limit_custom_days: Optional[int] = None
 
 
 class EmployeeCreate(EmployeeBase):
@@ -42,6 +45,9 @@ class EmployeeUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
     is_manager: Optional[bool] = None
+    spending_limit: Optional[float] = None
+    spending_limit_period: Optional[str] = None
+    spending_limit_custom_days: Optional[int] = None
 
 
 class EmployeeResponse(BaseModel):
@@ -72,6 +78,9 @@ class EmployeeResponse(BaseModel):
     manager_id: Optional[int] = None
     manager_name: Optional[str] = None
     manager_phone: Optional[str] = None
+    spending_limit: Optional[float] = None
+    spending_limit_period: Optional[str] = None
+    spending_limit_custom_days: Optional[int] = None
     
     class Config:
         from_attributes = True

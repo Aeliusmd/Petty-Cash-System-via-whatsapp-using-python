@@ -597,6 +597,67 @@ class Claim(BaseModel):
         
         return total
 
+    @classmethod
+    async def get_employee_spending_summary(cls, employee_id: int) -> Dict[str, Any]:
+        """
+        Get employee spending summary for the current period.
+        Calculates total approved spending within the employee's configured budget period.
+        """
+        from app.models.employee import Employee
+        from datetime import timedelta
+        
+        employee = await Employee.find_by_id(employee_id)
+        if not employee:
+            return {}
+        
+        spending_limit = float(employee.spending_limit) if employee.spending_limit is not None else None
+        period = employee.spending_limit_period or 'monthly'
+        custom_days = employee.spending_limit_custom_days
+        
+        # Calculate period start date
+        today = date.today()
+        if period == 'daily':
+            period_start = today
+            period_label = 'Today'
+        elif period == 'weekly':
+            # Start of current week (Monday)
+            period_start = today - timedelta(days=today.weekday())
+            period_label = 'This Week'
+        elif period == 'monthly':
+            period_start = today.replace(day=1)
+            period_label = 'This Month'
+        elif period == 'custom' and custom_days:
+            period_start = today - timedelta(days=custom_days)
+            period_label = f'Last {custom_days} Days'
+        else:
+            period_start = today.replace(day=1)  # fallback to monthly
+            period_label = 'This Month'
+        
+        # Query total approved spending in the period
+        result = await db.query("""
+            SELECT COALESCE(SUM(c.final_amount), 0) as total_spent
+            FROM claims c
+            JOIN claim_statuses cs ON c.status_id = cs.id
+            WHERE c.employee_id = $1 
+              AND cs.code = 'APPROVED'
+              AND c.approved_at >= $2
+        """, employee_id, period_start)
+        
+        total_spent = float(result[0]['total_spent']) if result else 0.0
+        available = max(0, spending_limit - total_spent) if spending_limit is not None else None
+        
+        return {
+            'employee_id': employee_id,
+            'employee_name': employee.name,
+            'spending_limit': spending_limit,
+            'spending_limit_period': period,
+            'spending_limit_custom_days': custom_days,
+            'period_label': period_label,
+            'period_start': period_start.isoformat(),
+            'total_spent': total_spent,
+            'available': available
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert claim to dictionary"""
         return {

@@ -332,7 +332,7 @@ class ClaimController(BaseController):
         self,
         request: Request,
         category_id: int = Form(...),
-        amount: float = Form(...),
+        amount: Optional[float] = Form(None),
         description: str = Form(...),
         location_id: int = Form(None),
         quotations: List[UploadFile] = File(None),
@@ -348,7 +348,7 @@ class ClaimController(BaseController):
             raise HTTPException(status_code=404, detail="Employee not found")
         
         # Determine final amount: prioritize user-entered amount, then extract from quotations
-        final_amount = amount  # Start with user-entered amount
+        final_amount = amount or 0.0  # Start with user-entered amount or 0
         total_from_quotations = 0
         
         # Handle quotation uploads first to extract amounts

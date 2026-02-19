@@ -120,9 +120,10 @@ async def extract_expense_from_image(image_buffer: bytes) -> dict:
             for group in doc.get('LineItemGroups', []):
                 for item in group.get('LineItems', []):
                     for field in item.get('LineItemExpenseFields', []):
+                        field_type = field.get('Type', {}).get('Text', 'UNKNOWN')
                         text = field.get('ValueDetection', {}).get('Text', '')
                         if text:
-                            all_text.append(text)
+                            all_text.append(f"{field_type}: {text}")
             
             # Extract any Block text
             for block in doc.get('Blocks', []):

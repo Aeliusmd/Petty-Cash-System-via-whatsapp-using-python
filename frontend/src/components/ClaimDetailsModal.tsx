@@ -511,11 +511,37 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                             'service_charge': { label: 'Service Charge', icon: '•' },
                             'discount': { label: 'Discount', icon: '•' },
                             'gratuity': { label: 'Gratuity', icon: '•' },
+                            // Line Items
+                            'item': { label: 'Item', icon: '•' },
+                            'description': { label: 'Description', icon: '•' },
+                            'quantity': { label: 'Qty', icon: '•' },
+                            'price': { label: 'Price', icon: '•' },
+                            'unit_price': { label: 'Unit Price', icon: '•' },
+                            'product_code': { label: 'Product Code', icon: '•' },
+                            
+                            // Common Aliases & Cleanups
+                            'bill date': { label: 'Date', icon: '•' },
+                            'bill no.': { label: 'Invoice ID', icon: '•' },
+                            'order no.': { label: 'Order No', icon: '•' },
+                            'address': { label: 'Address', icon: '•' },
+                            'street': { label: 'Address', icon: '•' },
+                            'city': { label: 'City', icon: '•' },
+                            'address_block': { label: 'Address', icon: '•' },
+                            'vendor_address': { label: 'Address', icon: '•' },
+                            'cash/card': { label: 'Amount Paid', icon: '•' }, // Corrected label for amount
+                            'payment mode': { label: 'Payment Method', icon: '•' },
+                            'change': { label: 'Change Due', icon: '•' },
+                            'contact no': { label: 'Contact', icon: '•' },
+                            'items': { label: 'Item Count', icon: '•' },
+                            'qty.': { label: 'Qty', icon: '•' },
+                            'qty': { label: 'Qty', icon: '•' }, // Added alias specifically for 'qty' without dot
+                            'operator id': { label: 'Operator', icon: '•' },
                           };
 
                           // Parse ocr_raw_text into structured key-value pairs
                           const parsedFields: { label: string; icon: string; value: string }[] = [];
-                          const seenLabels = new Set<string>();
+                          const seenEntries = new Set<string>(); // For multi-value fields (value-based unique)
+                          const seenLabels = new Set<string>();  // For single-value fields (label-based unique)
 
                           if (receipt.ocr_raw_text) {
                             const lines = receipt.ocr_raw_text.trim().split('\n');
@@ -530,9 +556,26 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
 
                                 // Look up in field map (try lowercase key)
                                 const mapped = FIELD_MAP[rawKey.toLowerCase()] || { label: rawKey, icon: '•' };
-                                if (!seenLabels.has(mapped.label.toLowerCase())) {
-                                  seenLabels.add(mapped.label.toLowerCase());
-                                  parsedFields.push({ label: mapped.label, icon: mapped.icon, value });
+                                
+                                // Determine if field supports multiple values (only true line-item fields)
+                                const isMultiValue = [
+                                  'Item', 'Description'
+                                ].includes(mapped.label);
+                                
+                                if (isMultiValue) {
+                                  // For line items, allow duplicates if value differs
+                                  const uniqueKey = `${mapped.label.toLowerCase()}:${value.toLowerCase()}`;
+                                  if (!seenEntries.has(uniqueKey)) {
+                                    seenEntries.add(uniqueKey);
+                                    parsedFields.push({ label: mapped.label, icon: mapped.icon, value });
+                                  }
+                                } else {
+                                  // For summary fields (Date, Vendor, Total), enforce SINGLE entry
+                                  const labelKey = mapped.label.toLowerCase();
+                                  if (!seenLabels.has(labelKey)) {
+                                    seenLabels.add(labelKey);
+                                    parsedFields.push({ label: mapped.label, icon: mapped.icon, value });
+                                  }
                                 }
                               }
                             }

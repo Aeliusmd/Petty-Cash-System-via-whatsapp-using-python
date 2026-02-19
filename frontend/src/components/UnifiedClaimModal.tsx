@@ -154,18 +154,14 @@ export default function UnifiedClaimModal({ isOpen, onClose, onSuccess }: Unifie
 
     // Validation based on claim type
     if (claimType === 'reimbursement') {
-      if (!categoryId || files.length === 0) {
-        setError('Category and at least one receipt are required for reimbursement claims');
+      if (!categoryId || files.length === 0 || !amount) {
+        setError('Category, amount, and at least one receipt are required');
         return;
       }
     } else {
       // Advance
-      if (!categoryId || !description) {
-        setError('Category and description are required for advance claims');
-        return;
-      }
-      if (files.length === 0 && !amount) {
-        setError('Either enter an amount or upload quotations');
+      if (!categoryId || !description || !amount) {
+        setError('Category, description, and amount are required for advance claims');
         return;
       }
     }
@@ -370,9 +366,10 @@ export default function UnifiedClaimModal({ isOpen, onClose, onSuccess }: Unifie
           </div>
 
           {/* Amount */}
+          {/* Amount */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Amount (Rs.) {claimType === 'advance' && files.length === 0 && <span className="text-red-500">*</span>}
+              Amount (Rs.) <span className="text-red-500">*</span>
             </label>
             <input
               type="number"
@@ -382,11 +379,11 @@ export default function UnifiedClaimModal({ isOpen, onClose, onSuccess }: Unifie
               onChange={(e) => setAmount(e.target.value)}
               placeholder="Enter claim amount"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              required={claimType === 'advance' && !files.length}
+              required
             />
-            {files.length > 0 && (
+            {files.length > 0 && claimType === 'reimbursement' && (
               <p className="text-sm text-gray-500 mt-1">
-                💡 You can enter amount manually or let the backend calculate from {claimType === 'reimbursement' ? 'receipts' : 'quotations'}
+                💡 Please verify the amount matches your receipt
               </p>
             )}
           </div>

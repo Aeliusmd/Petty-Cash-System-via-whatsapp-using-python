@@ -69,10 +69,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!permRefreshed || isLoading) return;
-    if (hasConfigAccess && user?.organization_id) {
+    if (user?.organization_id) {
       fetchDepartments();
     }
-  }, [hasConfigAccess, user, isLoading, permRefreshed]);
+  }, [user, isLoading, permRefreshed]);
 
 
 
@@ -228,13 +228,13 @@ export default function SettingsPage() {
     );
   }
 
-  if (!hasConfigAccess || !user?.organization_id) {
+  // Removed Access Denied block to allow read-only access for all org members
+  if (!user?.organization_id && !isLoading && permRefreshed) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <div className="text-red-500 text-6xl mb-4">🚫</div>
-          <h1 className="text-2xl font-bold text-red-600 mb-2">Access Denied</h1>
-          <p className="text-gray-600">Admin privileges required to access this page.</p>
+          <h1 className="text-xl font-bold text-gray-600 mb-2">No Organization Found</h1>
+          <p className="text-gray-500">You are not linked to any organization.</p>
         </div>
       </div>
     );
@@ -275,16 +275,18 @@ export default function SettingsPage() {
         <div>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold">Departments</h2>
-            <button
-              onClick={() => {
-                setEditingDept(null);
-                setDeptFormData({ code: '', name: '' });
-                setShowDeptModal(true);
-              }}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            >
-              + Add Department
-            </button>
+            {canManageConfig && (
+              <button
+                onClick={() => {
+                  setEditingDept(null);
+                  setDeptFormData({ code: '', name: '' });
+                  setShowDeptModal(true);
+                }}
+                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+              >
+                + Add Department
+              </button>
+            )}
           </div>
 
           {loadingDepts ? (
@@ -314,22 +316,26 @@ export default function SettingsPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap space-x-2">
-                          <button
-                            onClick={() => {
-                              setEditingDept(dept);
-                              setDeptFormData({ code: dept.code, name: dept.name });
-                              setShowDeptModal(true);
-                            }}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeptDelete(dept.id)}
-                            className="text-red-600 hover:text-red-800"
-                          >
-                            Delete
-                          </button>
+                          {canManageConfig && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingDept(dept);
+                                  setDeptFormData({ code: dept.code, name: dept.name });
+                                  setShowDeptModal(true);
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeptDelete(dept.id)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -351,22 +357,26 @@ export default function SettingsPage() {
                       </span>
                     </div>
                     <div className="flex justify-end gap-4 mt-3 pt-3 border-t border-gray-50">
-                      <button
-                        onClick={() => {
-                          setEditingDept(dept);
-                          setDeptFormData({ code: dept.code, name: dept.name });
-                          setShowDeptModal(true);
-                        }}
-                        className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeptDelete(dept.id)}
-                        className="text-sm text-red-600 hover:text-red-800 font-medium"
-                      >
-                        Delete
-                      </button>
+                      {canManageConfig && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditingDept(dept);
+                              setDeptFormData({ code: dept.code, name: dept.name });
+                              setShowDeptModal(true);
+                            }}
+                            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeptDelete(dept.id)}
+                            className="text-sm text-red-600 hover:text-red-800 font-medium"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -403,23 +413,25 @@ export default function SettingsPage() {
             <>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">Categories</h2>
-                <button
-                  onClick={() => {
-                    setEditingCat(null);
-                    setCatFormData({
-                      code: '',
-                      name: '',
-                      description: '',
-                      requires_receipt: false,
-                      display_order: 0,
-                      prompt_message: ''
-                    });
-                    setShowCatModal(true);
-                  }}
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm md:text-base"
-                >
-                  + Add Category
-                </button>
+                {canManageConfig && (
+                  <button
+                    onClick={() => {
+                      setEditingCat(null);
+                      setCatFormData({
+                        code: '',
+                        name: '',
+                        description: '',
+                        requires_receipt: false,
+                        display_order: 0,
+                        prompt_message: ''
+                      });
+                      setShowCatModal(true);
+                    }}
+                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm md:text-base"
+                  >
+                    + Add Category
+                  </button>
+                )}
               </div>
 
               {loadingCats ? (
@@ -448,29 +460,33 @@ export default function SettingsPage() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">{cat.display_order}</td>
                             <td className="px-6 py-4 whitespace-nowrap space-x-2">
-                              <button
-                                onClick={() => {
-                                  setEditingCat(cat);
-                                  setCatFormData({
-                                    code: cat.code,
-                                    name: cat.name,
-                                    description: cat.description || '',
-                                    requires_receipt: cat.requires_receipt,
-                                    display_order: cat.display_order,
-                                    prompt_message: cat.prompt_message || ''
-                                  });
-                                  setShowCatModal(true);
-                                }}
-                                className="text-blue-600 hover:text-blue-800"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleCatDelete(cat.id)}
-                                className="text-red-600 hover:text-red-800"
-                              >
-                                Delete
-                              </button>
+                              {canManageConfig && (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCat(cat);
+                                      setCatFormData({
+                                        code: cat.code,
+                                        name: cat.name,
+                                        description: cat.description || '',
+                                        requires_receipt: cat.requires_receipt,
+                                        display_order: cat.display_order,
+                                        prompt_message: cat.prompt_message || ''
+                                      });
+                                      setShowCatModal(true);
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleCatDelete(cat.id)}
+                                    className="text-red-600 hover:text-red-800"
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -503,29 +519,33 @@ export default function SettingsPage() {
                         <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-50">
                           <span className="text-xs text-gray-400">Order: {cat.display_order}</span>
                           <div className="flex gap-4">
-                            <button
-                              onClick={() => {
-                                setEditingCat(cat);
-                                setCatFormData({
-                                  code: cat.code,
-                                  name: cat.name,
-                                  description: cat.description || '',
-                                  requires_receipt: cat.requires_receipt,
-                                  display_order: cat.display_order,
-                                  prompt_message: cat.prompt_message || ''
-                                });
-                                setShowCatModal(true);
-                              }}
-                              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleCatDelete(cat.id)}
-                              className="text-sm text-red-600 hover:text-red-800 font-medium"
-                            >
-                              Delete
-                            </button>
+                            {canManageConfig && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setEditingCat(cat);
+                                    setCatFormData({
+                                      code: cat.code,
+                                      name: cat.name,
+                                      description: cat.description || '',
+                                      requires_receipt: cat.requires_receipt,
+                                      display_order: cat.display_order,
+                                      prompt_message: cat.prompt_message || ''
+                                    });
+                                    setShowCatModal(true);
+                                  }}
+                                  className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleCatDelete(cat.id)}
+                                  className="text-sm text-red-600 hover:text-red-800 font-medium"
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>

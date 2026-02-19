@@ -25,6 +25,22 @@ interface Role {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
+// Category icons for friendly display
+const CATEGORY_ICONS: Record<string, string> = {
+  'Claims':    '💰',
+  'Employees': '👥',
+  'Settings':  '⚙️',
+  'Reports':   '📊',
+  'Audit':     '📋',
+  'Roles':     '🎭',
+  'default':   '🔑',
+};
+
+function categoryLabel(cat: string) {
+  const icon = CATEGORY_ICONS[cat] ?? CATEGORY_ICONS['default'];
+  return `${icon}  ${cat}`;
+}
+
 // Group permissions by category for better UI
 const groupPermissionsByCategory = (permissions: Permission[]) => {
   return permissions.reduce((acc, perm) => {
@@ -267,7 +283,7 @@ export default function RolesPage() {
                   <span 
                     key={perm.id} 
                     className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded"
-                    title={perm.description}
+                    title={perm.description || perm.name}
                   >
                     {perm.name}
                   </span>
@@ -395,10 +411,10 @@ export default function RolesPage() {
                               onChange={() => {}}
                               className="rounded border-gray-300"
                             />
-                            <span className="font-medium text-gray-800 capitalize">
-                              {category.replace(/_/g, ' ')}
+                            <span className="font-semibold text-gray-800">
+                              {categoryLabel(category)}
                             </span>
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-gray-400">
                               ({permissions.length})
                             </span>
                           </button>
@@ -408,18 +424,16 @@ export default function RolesPage() {
                             {permissions.map((perm) => (
                               <label 
                                 key={perm.id}
-                                className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer"
+                                className="flex items-start gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer"
+                                title={perm.description || ''}
                               >
                                 <input
                                   type="checkbox"
                                   checked={selectedPermissions.includes(perm.code)}
                                   onChange={() => togglePermission(perm.code)}
-                                  className="rounded border-gray-300 text-indigo-600"
+                                  className="rounded border-gray-300 text-indigo-600 mt-0.5"
                                 />
-                                <div>
-                                  <p className="text-sm text-gray-800">{perm.name}</p>
-                                  <p className="text-xs text-gray-500">{perm.code}</p>
-                                </div>
+                                <span className="text-sm text-gray-800">{perm.name}</span>
                               </label>
                             ))}
                           </div>

@@ -269,7 +269,7 @@ class Employee(BaseModel):
             param_idx += 1
         
         if organization_id:
-            query += f" AND u.organization_id = ${param_idx}"
+            query += f" AND e.organization_id = ${param_idx}"
             params.append(organization_id)
             param_idx += 1
         
@@ -293,15 +293,15 @@ class Employee(BaseModel):
         result = await db.query("""
             INSERT INTO employees (employee_code, name, phone_number, email,
                                    grade_id, unit_id, location_id, manager_id, role, role_id,
-                                   is_admin, is_manager,
+                                   organization_id, is_admin, is_manager,
                                    spending_limit, spending_limit_period, spending_limit_custom_days)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 
-                    (SELECT id FROM roles WHERE code = $9 LIMIT 1), -- Auto-map role string to ID
-                    $10, $11, $12, $13, $14) RETURNING *
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::VARCHAR, 
+                    (SELECT id FROM roles WHERE code = $9::VARCHAR LIMIT 1), -- Auto-map role string to ID
+                    $10, $11, $12, $13, $14, $15) RETURNING *
         """, employee_code, data.get('name'), data.get('phone_number'),
             data.get('email'), data.get('grade_id'), data.get('unit_id'),
             data.get('location_id'), data.get('manager_id'), data.get('role', 'staff'),
-            data.get('is_admin', False), data.get('is_manager', False),
+            data.get('organization_id'), data.get('is_admin', False), data.get('is_manager', False),
             data.get('spending_limit'), data.get('spending_limit_period', 'monthly'),
             data.get('spending_limit_custom_days'))
         

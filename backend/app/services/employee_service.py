@@ -94,6 +94,10 @@ class EmployeeService(BaseService):
             if org_id:
                 data['role_id'] = await self._resolve_role_id(data['role'], org_id)
 
+        # Inject organization_id into data so the model can insert it
+        if organization_id and 'organization_id' not in data:
+            data['organization_id'] = organization_id
+
         employee = await Employee.create(data)
         
         await self.audit_service.log_employee_action(

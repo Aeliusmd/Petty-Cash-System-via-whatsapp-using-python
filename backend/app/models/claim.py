@@ -48,6 +48,7 @@ class Claim(BaseModel):
     manager_name: str = None
     approver_name: str = None
     unit_name: str = None
+    organization_id: int = None  # Derived from employee's unit/org — used for isolation checks
     
     def __init__(self, data: Dict[str, Any] = None):
         """Initialize claim from data dict"""
@@ -82,7 +83,8 @@ class Claim(BaseModel):
             SELECT c.*, e.name as employee_name, e.employee_code, g.code as grade_code,
                    cat.code as category_code, cat.name as category_name,
                    l.name as location_name, s.code as status_code, s.name as status_name,
-                   m.name as manager_name, a.name as approver_name
+                   m.name as manager_name, a.name as approver_name,
+                   COALESCE(e.organization_id, org.id) as organization_id
             FROM claims c
             JOIN employees e ON c.employee_id = e.id
             LEFT JOIN grades g ON e.grade_id = g.id
@@ -91,6 +93,8 @@ class Claim(BaseModel):
             JOIN claim_statuses s ON c.status_id = s.id
             LEFT JOIN employees m ON c.manager_id = m.id
             LEFT JOIN employees a ON c.approved_by = a.id
+            LEFT JOIN units u ON e.unit_id = u.id
+            LEFT JOIN organizations org ON u.organization_id = org.id
             WHERE c.id = $1
         """, claim_id)
         

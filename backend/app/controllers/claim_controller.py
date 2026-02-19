@@ -203,7 +203,16 @@ class ClaimController(BaseController):
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
         
-        # Check access
+        # ── Organization Isolation ──────────────────────────────────────────────
+        # Ensure users can never view claims from a different organization.
+        # Super-admin without an org context is allowed to view all.
+        requester_org = auth.get('organization_id')
+        if requester_org and hasattr(claim, 'organization_id') and claim.organization_id:
+            if claim.organization_id != requester_org:
+                raise HTTPException(status_code=404, detail="Claim not found")
+        # ───────────────────────────────────────────────────────────────────────
+
+        # Check per-user access
         permissions = auth.get('permissions', [])
         is_own = claim.employee_id == auth['employee_id']
         is_manager = claim.manager_id == auth['employee_id']

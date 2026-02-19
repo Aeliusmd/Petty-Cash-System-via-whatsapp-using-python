@@ -78,10 +78,32 @@ async def require_admin(authorization: str = Header(None)) -> dict:
 
 async def require_authenticated(authorization: str = Header(None)) -> dict:
     """
-    Middleware to require any authenticated user
-    Use this to protect general endpoints
+    Middleware to require any authenticated user.
+    Loads fresh organization_id from the database so org-scoped queries
+    always use the correct context (fixes cross-org data leakage for new org users).
     """
-    return await get_current_user(authorization)
+    payload = await get_current_user(authorization)
+
+    # Super admin bypass - they don't need org loading here
+    if payload.get("role") == "super_admin":
+        return payload
+
+    # Load fresh employee data (including organization_id) from DB
+    from app.models.employee import Employee
+    employee_id = payload.get("employee_id")
+    if employee_id:
+        employee = await Employee.find_by_id(employee_id)
+        if employee:
+            # Update org context in payload from live DB data
+            if employee.organization_id:
+                payload['organization_id'] = employee.organization_id
+            if employee.organization_name:
+                payload['organization_name'] = employee.organization_name
+            # Also load permissions if not present in token
+            if not payload.get('permissions'):
+                payload['permissions'] = await employee.get_permissions()
+
+    return payload
 
 
 def check_role(user: dict, required_role: str) -> bool:

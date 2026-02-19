@@ -63,6 +63,7 @@ export default function SettingsPage() {
   // On first mount: immediately fetch fresh permissions from server so we never
   // show "Access Denied" based purely on stale localStorage.
   useEffect(() => {
+    console.log('Settings Page Mounting - Force Refresh');
     refreshPermissions().finally(() => setPermRefreshed(true));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

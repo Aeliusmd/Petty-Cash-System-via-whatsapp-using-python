@@ -25,30 +25,85 @@ interface Role {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
-// Category icons for friendly display
-const CATEGORY_ICONS: Record<string, string> = {
-  'Claims':    '💰',
-  'Employees': '👥',
-  'Settings':  '⚙️',
-  'Reports':   '📊',
-  'Audit':     '📋',
-  'Roles':     '🎭',
-  'default':   '🔑',
+// Simplified Permission Packages for Non-Technical Users
+const PERMISSION_PACKAGES = [
+  {
+    id: 'my_claims',
+    label: 'My Claims & Profile',
+    icon: '👤',
+    description: 'Submit claims, view own history, manage own profile',
+    codes: [
+      'claims.create', 'claims.read.own', 'claims.update.own',
+      'claims.delete.own', 'claims.appeal',
+      'employees.read.own', 'employees.update.own'
+    ]
+  },
+  {
+    id: 'claims_admin',
+    label: 'Claims Management',
+    icon: '💰',
+    description: 'View all claims, approve/reject, exports',
+    codes: [
+      'claims.read.team', 'claims.read.all', 'claims.update.all',
+      'claims.delete.all', 'claims.approve', 'claims.reject', 
+      'claims.export'
+    ]
+  },
+  {
+    id: 'employees_admin',
+    label: 'Employee Management',
+    icon: '👥',
+    description: 'Add, list, modify, and deactivate employees',
+    codes: [
+      'employees.create', 'employees.read.all', 'employees.update.all',
+      'employees.delete', 'employees.activate', 'employees.assign_role'
+    ]
+  },
+  {
+    id: 'reports',
+    label: 'Reports & Dashboard',
+    icon: '📊',
+    description: 'View financial reports and dashboards',
+    codes: [
+      'reports.view', 'reports.financial',
+      'dashboard.view.team', 'dashboard.view.org'
+    ]
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    icon: '⚙️',
+    description: 'Manage departments and claim categories',
+    codes: ['config.view', 'config.manage']
+  },
+  {
+    id: 'audit',
+    label: 'Audit Logs',
+    icon: '📋',
+    description: 'View system audit logs',
+    codes: ['audit.view']
+  },
+  {
+    id: 'roles',
+    label: 'Role Management',
+    icon: '🎭',
+    description: 'Create and manage custom roles',
+    codes: ['roles.read', 'roles.create', 'roles.update', 'roles.delete']
+  }
+];
+
+// Helper to check if a role/selection has a package
+const hasPackage = (packageId: string, activeCodes: string[]) => {
+  const pkg = PERMISSION_PACKAGES.find(p => p.id === packageId);
+  if (!pkg) return false;
+  // If the package has codes, check if ALL of them are present
+  // We use "every" for strict matching, so a package is only "on" if fully supported
+  return pkg.codes.every(code => activeCodes.includes(code));
 };
 
-function categoryLabel(cat: string) {
-  const icon = CATEGORY_ICONS[cat] ?? CATEGORY_ICONS['default'];
-  return `${icon}  ${cat}`;
-}
-
-// Group permissions by category for better UI
-const groupPermissionsByCategory = (permissions: Permission[]) => {
-  return permissions.reduce((acc, perm) => {
-    const category = perm.category || 'Other';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(perm);
-    return acc;
-  }, {} as Record<string, Permission[]>);
+const getPackagesForRole = (permissions: Permission[]) => {
+  const roleCodes = permissions.map(p => p.code);
+  return PERMISSION_PACKAGES.filter(pkg => hasPackage(pkg.id, roleCodes));
 };
 
 export default function RolesPage() {
@@ -136,22 +191,18 @@ export default function RolesPage() {
     setShowModal(true);
   }
 
-  function togglePermission(code: string) {
-    setSelectedPermissions(prev => 
-      prev.includes(code) 
-        ? prev.filter(p => p !== code) 
-        : [...prev, code]
-    );
-  }
+  function togglePackage(pkgId: string) {
+    const pkg = PERMISSION_PACKAGES.find(p => p.id === pkgId);
+    if (!pkg) return;
 
-  function toggleCategory(category: string, permissions: Permission[]) {
-    const categoryCodes = permissions.map(p => p.code);
-    const allSelected = categoryCodes.every(code => selectedPermissions.includes(code));
-    
-    if (allSelected) {
-      setSelectedPermissions(prev => prev.filter(p => !categoryCodes.includes(p)));
+    const isActive = hasPackage(pkgId, selectedPermissions);
+
+    if (isActive) {
+      // Remove all codes from this package
+      setSelectedPermissions(prev => prev.filter(c => !pkg.codes.includes(c)));
     } else {
-      setSelectedPermissions(prev => [...new Set([...prev, ...categoryCodes])]);
+      // Add all codes (some might already be there, Set handles uniqueness later)
+      setSelectedPermissions(prev => [...new Set([...prev, ...pkg.codes])]);
     }
   }
 
@@ -218,7 +269,7 @@ export default function RolesPage() {
     }
   }
 
-  const groupedPermissions = groupPermissionsByCategory(allPermissions);
+
 
   if (loading) {
     return (
@@ -273,25 +324,25 @@ export default function RolesPage() {
               <p className="text-gray-600 text-sm mb-4">{role.description}</p>
             )}
             
-            {/* Permissions Summary */}
+            {/* Permissions Summary using Packages */}
             <div className="mb-4">
               <p className="text-xs font-medium text-gray-500 uppercase mb-2">
-                Permissions ({role.permissions.length})
+                Access Areas
               </p>
-              <div className="flex flex-wrap gap-1">
-                {role.permissions.slice(0, 5).map((perm) => (
-                  <span 
-                    key={perm.id} 
-                    className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded"
-                    title={perm.description || perm.name}
-                  >
-                    {perm.name}
-                  </span>
-                ))}
-                {role.permissions.length > 5 && (
-                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded">
-                    +{role.permissions.length - 5} more
-                  </span>
+              <div className="flex flex-wrap gap-2">
+                {getPackagesForRole(role.permissions).length > 0 ? (
+                  getPackagesForRole(role.permissions).map((pkg) => (
+                    <span 
+                      key={pkg.id} 
+                      className="px-2 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded border border-indigo-100 flex items-center gap-1"
+                      title={pkg.description}
+                    >
+                      <span>{pkg.icon}</span>
+                      {pkg.label}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-gray-400 italic">Custom / No standard packages</span>
                 )}
               </div>
             </div>
@@ -383,61 +434,44 @@ export default function RolesPage() {
                   />
                 </div>
                 
-                {/* Permissions Selection */}
+                {/* Permissions Selection (Packages) */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Permissions ({selectedPermissions.length} selected)
+                    Access Permissions
                   </label>
                   
-                  <div className="border rounded-lg divide-y max-h-80 overflow-y-auto">
-                    {Object.entries(groupedPermissions).map(([category, permissions]) => {
-                      const allSelected = permissions.every(p => selectedPermissions.includes(p.code));
-                      const someSelected = permissions.some(p => selectedPermissions.includes(p.code));
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {PERMISSION_PACKAGES.map((pkg) => {
+                      const isSelected = hasPackage(pkg.id, selectedPermissions);
                       
                       return (
-                        <div key={category} className="p-3">
-                          {/* Category Header */}
-                          <button
-                            type="button"
-                            onClick={() => toggleCategory(category, permissions)}
-                            className="flex items-center gap-2 w-full text-left mb-2 hover:bg-gray-50 rounded p-1"
-                          >
+                        <label 
+                          key={pkg.id}
+                          className={`
+                            relative flex items-start p-3 rounded-lg border cursor-pointer transition-all
+                            ${isSelected 
+                              ? 'bg-indigo-50 border-indigo-200 shadow-sm' 
+                              : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                            }
+                          `}
+                        >
+                          <div className="flex items-center h-5">
                             <input
                               type="checkbox"
-                              checked={allSelected}
-                              ref={(input) => {
-                                if (input) input.indeterminate = someSelected && !allSelected;
-                              }}
-                              onChange={() => {}}
-                              className="rounded border-gray-300"
+                              checked={isSelected}
+                              onChange={() => togglePackage(pkg.id)}
+                              className="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded"
                             />
-                            <span className="font-semibold text-gray-800">
-                              {categoryLabel(category)}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                              ({permissions.length})
-                            </span>
-                          </button>
-                          
-                          {/* Permissions in Category */}
-                          <div className="grid grid-cols-2 gap-2 pl-6">
-                            {permissions.map((perm) => (
-                              <label 
-                                key={perm.id}
-                                className="flex items-start gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer"
-                                title={perm.description || ''}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedPermissions.includes(perm.code)}
-                                  onChange={() => togglePermission(perm.code)}
-                                  className="rounded border-gray-300 text-indigo-600 mt-0.5"
-                                />
-                                <span className="text-sm text-gray-800">{perm.name}</span>
-                              </label>
-                            ))}
                           </div>
-                        </div>
+                          <div className="ml-3 text-sm">
+                            <div className={`font-medium ${isSelected ? 'text-indigo-900' : 'text-gray-900'}`}>
+                              {pkg.icon} {pkg.label}
+                            </div>
+                            <p className={`text-xs mt-1 ${isSelected ? 'text-indigo-700' : 'text-gray-500'}`}>
+                              {pkg.description}
+                            </p>
+                          </div>
+                        </label>
                       );
                     })}
                   </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
@@ -44,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const permissionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Helper to schedule silent refresh
   const scheduleRefresh = useCallback((accessToken: string) => {
@@ -85,6 +86,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     } catch (e) {
       console.error('Error scheduling refresh:', e);
+    }
+  }, []);
+
+  // Silently refresh user data (permissions) from the server
+  const refreshPermissions = useCallback(async (currentToken: string) => {
+    if (!currentToken) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${currentToken}` }
+      });
+      if (res.ok) {
+        const freshUserData = await res.json();
+        setUser(freshUserData);
+        localStorage.setItem('auth_user', JSON.stringify(freshUserData));
+      } else if (res.status === 401) {
+        // Token expired mid-session – try refresh
+        await refreshSession();
+      }
+    } catch {
+      // Network error – silently ignore, we'll retry next interval
     }
   }, []);
 
@@ -217,7 +238,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     scheduleRefresh(accessToken);
   };
 
+  // ── Background permission polling ─────────────────────────────────────────
+  // Poll /api/auth/me every 30 s while the user is logged in so that
+  // admin-side role/permission changes are reflected automatically.
+  useEffect(() => {
+    if (!token) {
+      // Not logged in – clear any lingering interval
+      if (permissionPollRef.current) {
+        clearInterval(permissionPollRef.current);
+        permissionPollRef.current = null;
+      }
+      return;
+    }
+
+    // Start polling
+    const POLL_INTERVAL_MS = 30_000;
+
+    const poll = () => {
+      // Skip when the tab is hidden to save requests
+      if (document.visibilityState === 'hidden') return;
+      refreshPermissions(token);
+    };
+
+    permissionPollRef.current = setInterval(poll, POLL_INTERVAL_MS);
+
+    return () => {
+      if (permissionPollRef.current) {
+        clearInterval(permissionPollRef.current);
+        permissionPollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]); // Re-run whenever token changes (login/logout)
+  // ──────────────────────────────────────────────────────────────────────────
+
+
   const logout = () => {
+    // Stop permission polling
+    if (permissionPollRef.current) {
+      clearInterval(permissionPollRef.current);
+      permissionPollRef.current = null;
+    }
     setToken(null);
     setRefreshToken(null);
     setUser(null);

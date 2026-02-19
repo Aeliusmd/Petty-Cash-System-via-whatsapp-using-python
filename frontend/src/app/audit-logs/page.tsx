@@ -37,6 +37,7 @@ export default function AuditLogsPage() {
   const { token, isAuthenticated, isLoading, hasPermission } = useAuth();
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [accessRevoked, setAccessRevoked] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [limit] = useState(50);
@@ -65,7 +66,7 @@ export default function AuditLogsPage() {
   }, [isAuthenticated, isLoading, canViewAuditLogs, router]);
 
   useEffect(() => {
-    if (isAuthenticated && canViewAuditLogs && !isLoading) {
+    if (isAuthenticated && canViewAuditLogs && !isLoading && !accessRevoked) {
       fetchAuditLogs();
       
       // Auto-refresh every 10 seconds
@@ -75,7 +76,7 @@ export default function AuditLogsPage() {
       
       return () => clearInterval(interval);
     }
-  }, [page, filters, isAuthenticated, isLoading, canViewAuditLogs]);
+  }, [page, filters, isAuthenticated, isLoading, canViewAuditLogs, accessRevoked]);
 
 
 
@@ -99,12 +100,15 @@ export default function AuditLogsPage() {
       const response = await authenticatedFetch(`${API_BASE_URL}/api/audit-logs?${params}`);
 
       if (response.status === 401) {
-        // authenticatedFetch handles redirect, but we can return here
         return;
       }
 
       if (response.status === 403) {
-        alert('Access denied. Admin privileges required.');
+        // Permission was revoked – stop all future requests immediately
+        setAccessRevoked(true);
+        if (!silent) {
+          alert('Access denied. You no longer have permission to view audit logs.');
+        }
         router.push('/');
         return;
       }

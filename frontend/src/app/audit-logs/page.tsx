@@ -34,7 +34,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 export default function AuditLogsPage() {
   const router = useRouter();
-  const { token, isAuthenticated, hasPermission } = useAuth();
+  const { token, isAuthenticated, isLoading, hasPermission } = useAuth();
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -51,8 +51,8 @@ export default function AuditLogsPage() {
   // Permission-based access
   const canViewAuditLogs = hasPermission('audit.view');
 
-  // Check authentication and permission access
   useEffect(() => {
+    if (isLoading) return; // Wait for user data to be loaded
     if (!isAuthenticated) {
       router.push('/login');
       return;
@@ -62,10 +62,10 @@ export default function AuditLogsPage() {
       router.push('/');
       return;
     }
-  }, [isAuthenticated, canViewAuditLogs, router]);
+  }, [isAuthenticated, isLoading, canViewAuditLogs, router]);
 
   useEffect(() => {
-    if (isAuthenticated && canViewAuditLogs) {
+    if (isAuthenticated && canViewAuditLogs && !isLoading) {
       fetchAuditLogs();
       
       // Auto-refresh every 10 seconds
@@ -75,7 +75,7 @@ export default function AuditLogsPage() {
       
       return () => clearInterval(interval);
     }
-  }, [page, filters, isAuthenticated, canViewAuditLogs]);
+  }, [page, filters, isAuthenticated, isLoading, canViewAuditLogs]);
 
 
 

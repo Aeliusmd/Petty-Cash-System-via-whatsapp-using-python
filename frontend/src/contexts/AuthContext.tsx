@@ -241,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Background permission polling ─────────────────────────────────────────
   // Poll /api/auth/me every 30 s while the user is logged in so that
   // admin-side role/permission changes are reflected automatically.
+  // Also refreshes immediately when the user makes the tab visible again.
   useEffect(() => {
     if (!token) {
       // Not logged in – clear any lingering interval
@@ -251,26 +252,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Start polling
+    // Start polling every 30 s (skips when tab is hidden)
     const POLL_INTERVAL_MS = 30_000;
 
     const poll = () => {
-      // Skip when the tab is hidden to save requests
       if (document.visibilityState === 'hidden') return;
       refreshPermissions(token);
     };
 
     permissionPollRef.current = setInterval(poll, POLL_INTERVAL_MS);
 
+    // Also refresh immediately when the tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPermissions(token);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       if (permissionPollRef.current) {
         clearInterval(permissionPollRef.current);
         permissionPollRef.current = null;
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]); // Re-run whenever token changes (login/logout)
   // ──────────────────────────────────────────────────────────────────────────
+
 
 
   const logout = () => {

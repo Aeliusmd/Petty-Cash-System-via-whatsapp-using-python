@@ -31,7 +31,6 @@ export default function SettingsPage() {
   const router = useRouter();
   const { user, token, isLoading, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
-  const [accessDenied, setAccessDenied] = useState(false);
 
   // Departments state
   const [departments, setDepartments] = useState<Unit[]>([]);
@@ -61,28 +60,10 @@ export default function SettingsPage() {
   const hasConfigAccess = canViewConfig || canManageConfig;
 
   useEffect(() => {
-    console.log('Settings Page Debug:', {
-      isLoading,
-      userExists: !!user,
-      u_role: user?.role,
-      u_permissions: user?.permissions,
-      u_org_id: user?.organization_id,
-      canView: canViewConfig,
-      canManage: canManageConfig,
-      hasAccess: hasConfigAccess
-    });
-
     if (isLoading) return;
-
-    if (!hasConfigAccess || !user?.organization_id) {
-      console.warn('Access Denied: Missing permissions or org_id');
-      setAccessDenied(true);
-      // Removed timeout redirect for debugging
-      // setTimeout(() => router.push('/'), 2000);
-      return;
+    if (hasConfigAccess && user?.organization_id) {
+      fetchDepartments();
     }
-
-    fetchDepartments();
   }, [hasConfigAccess, user, isLoading, router]);
 
 
@@ -229,14 +210,23 @@ export default function SettingsPage() {
     }
   };
 
-  if (accessDenied) {
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasConfigAccess || !user?.organization_id) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex flex-col items-center justify-center min-h-[400px]">
           <div className="text-red-500 text-6xl mb-4">🚫</div>
           <h1 className="text-2xl font-bold text-red-600 mb-2">Access Denied</h1>
           <p className="text-gray-600">Admin privileges required to access this page.</p>
-          <p className="text-gray-400 text-sm mt-2">Redirecting to dashboard...</p>
         </div>
       </div>
     );

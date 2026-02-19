@@ -187,7 +187,8 @@ class Employee(BaseModel):
             SELECT e.*, g.code as grade_code, g.name as grade_name,
                    u.code as unit_code, u.name as unit_name,
                    l.code as location_code, l.name as location_name,
-                   o.id as organization_id, o.name as organization_name
+                   COALESCE(e.organization_id, o.id) as organization_id,
+                   o.name as organization_name
             FROM employees e
             LEFT JOIN grades g ON e.grade_id = g.id
             LEFT JOIN units u ON e.unit_id = u.id

@@ -59,6 +59,7 @@ class ReceiptInfo(BaseModel):
     file_type: Optional[str] = None
     file_size: Optional[int] = None
     ocr_amount: Optional[float] = None
+    ocr_raw_text: Optional[str] = None
     vendor: Optional[str] = None
     uploaded_at: Optional[datetime] = None
     message_id: Optional[str] = None

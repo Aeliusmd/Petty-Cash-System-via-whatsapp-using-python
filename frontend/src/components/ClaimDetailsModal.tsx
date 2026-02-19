@@ -484,33 +484,33 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                           // Map Textract raw field names → friendly display labels + icons
                           const FIELD_MAP: Record<string, { label: string; icon: string }> = {
                             // Vendor
-                            'vendor_name': { label: 'Vendor', icon: '🏪' },
-                            'vendor': { label: 'Vendor', icon: '🏪' },
-                            'name': { label: 'Vendor', icon: '🏪' },
+                            'vendor_name': { label: 'Vendor', icon: '•' },
+                            'vendor': { label: 'Vendor', icon: '•' },
+                            'name': { label: 'Vendor', icon: '•' },
                             // Date
-                            'invoice_receipt_date': { label: 'Date', icon: '📅' },
-                            'date': { label: 'Date', icon: '📅' },
-                            'order_date': { label: 'Order Date', icon: '📅' },
+                            'invoice_receipt_date': { label: 'Date', icon: '•' },
+                            'date': { label: 'Date', icon: '•' },
+                            'order_date': { label: 'Order Date', icon: '•' },
                             // Invoice ID
-                            'invoice_receipt_id': { label: 'Invoice ID', icon: '🔢' },
-                            'invoice id': { label: 'Invoice ID', icon: '🔢' },
-                            'receiver_vat_number': { label: 'VAT Number', icon: '🔢' },
+                            'invoice_receipt_id': { label: 'Invoice ID', icon: '•' },
+                            'invoice id': { label: 'Invoice ID', icon: '•' },
+                            'receiver_vat_number': { label: 'VAT Number', icon: '•' },
                             // Amounts
-                            'total': { label: 'Total', icon: '💰' },
-                            'amount_due': { label: 'Amount Due', icon: '💰' },
-                            'amount_paid': { label: 'Amount Paid', icon: '💰' },
-                            'subtotal': { label: 'Subtotal', icon: '🧮' },
+                            'total': { label: 'Total', icon: '•' },
+                            'amount_due': { label: 'Amount Due', icon: '•' },
+                            'amount_paid': { label: 'Amount Paid', icon: '•' },
+                            'subtotal': { label: 'Subtotal', icon: '•' },
                             // Tax
-                            'tax': { label: 'Tax', icon: '📊' },
-                            'tax_payer_id': { label: 'Tax ID', icon: '📊' },
+                            'tax': { label: 'Tax', icon: '•' },
+                            'tax_payer_id': { label: 'Tax ID', icon: '•' },
                             // Other common fields
-                            'due_date': { label: 'Due Date', icon: '📅' },
-                            'po_number': { label: 'PO Number', icon: '🔢' },
-                            'account_number': { label: 'Account No.', icon: '🔢' },
-                            'payment_terms': { label: 'Payment Terms', icon: '📋' },
-                            'service_charge': { label: 'Service Charge', icon: '🧮' },
-                            'discount': { label: 'Discount', icon: '🏷️' },
-                            'gratuity': { label: 'Gratuity', icon: '🧮' },
+                            'due_date': { label: 'Due Date', icon: '•' },
+                            'po_number': { label: 'PO Number', icon: '•' },
+                            'account_number': { label: 'Account No.', icon: '•' },
+                            'payment_terms': { label: 'Payment Terms', icon: '•' },
+                            'service_charge': { label: 'Service Charge', icon: '•' },
+                            'discount': { label: 'Discount', icon: '•' },
+                            'gratuity': { label: 'Gratuity', icon: '•' },
                           };
 
                           // Parse ocr_raw_text into structured key-value pairs
@@ -541,10 +541,10 @@ export default function ClaimDetailsModal({ claim, isOpen, onClose }: ClaimDetai
                           // Fallback: if no parsed fields, build from dedicated columns
                           if (parsedFields.length === 0) {
                             if (receipt.vendor) {
-                              parsedFields.push({ label: 'Vendor', icon: '🏪', value: receipt.vendor });
+                              parsedFields.push({ label: 'Vendor', icon: '•', value: receipt.vendor });
                             }
                             if (receipt.ocr_amount) {
-                              parsedFields.push({ label: 'Total', icon: '💰', value: formatCurrency(receipt.ocr_amount) });
+                              parsedFields.push({ label: 'Total', icon: '•', value: formatCurrency(receipt.ocr_amount) });
                             }
                           }
 

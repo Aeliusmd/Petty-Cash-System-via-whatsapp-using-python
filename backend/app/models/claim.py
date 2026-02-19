@@ -571,7 +571,7 @@ class Claim(BaseModel):
         """Get all receipts for a claim"""
         return await db.query("""
             SELECT id, claim_id, file_path, file_name, file_type, file_size,
-                   ocr_amount, uploaded_at, message_id, vendor
+                   ocr_amount, ocr_raw_text, uploaded_at, message_id, vendor
             FROM claim_receipts
             WHERE claim_id = $1
             ORDER BY uploaded_at DESC

@@ -30,6 +30,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 export default function SettingsPage() {
   const router = useRouter();
   const { user, token, isLoading, hasPermission, refreshPermissions } = useAuth();
+  // permRefreshed gates all data fetches — we only set it true once we have
+  // a definitive answer from the server (not just stale localStorage).
   const [permRefreshed, setPermRefreshed] = useState(false);
   const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
 
@@ -60,13 +62,21 @@ export default function SettingsPage() {
   const canManageConfig = hasPermission('config.manage');
   const hasConfigAccess = canViewConfig || canManageConfig;
 
-  // On first mount: immediately fetch fresh permissions from server so we never
-  // show "Access Denied" based purely on stale localStorage.
+  // Wait for AuthContext to finish loading, then force a refresh to get the
+  // latest org / permissions from the server (fixes stale localStorage data).
   useEffect(() => {
-    console.log('Settings Page Mounting - Force Refresh');
+    if (isLoading) return; // Auth still initialising — wait
+
+    if (!token) {
+      // Not logged in at all — mark as done so we don't spin forever
+      setPermRefreshed(true);
+      return;
+    }
+
+    console.log('Settings Page - Refreshing permissions from server');
     refreshPermissions().finally(() => setPermRefreshed(true));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isLoading, token]); // Re-run when auth finishes loading or token changes
 
   useEffect(() => {
     if (!permRefreshed || isLoading) return;

@@ -29,7 +29,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, token, isLoading, hasPermission } = useAuth();
+  const { user, token, isLoading, hasPermission, refreshPermissions } = useAuth();
+  const [permRefreshed, setPermRefreshed] = useState(false);
   const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
 
   // Departments state
@@ -59,12 +60,19 @@ export default function SettingsPage() {
   const canManageConfig = hasPermission('config.manage');
   const hasConfigAccess = canViewConfig || canManageConfig;
 
+  // On first mount: immediately fetch fresh permissions from server so we never
+  // show "Access Denied" based purely on stale localStorage.
   useEffect(() => {
-    if (isLoading) return;
+    refreshPermissions().finally(() => setPermRefreshed(true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!permRefreshed || isLoading) return;
     if (hasConfigAccess && user?.organization_id) {
       fetchDepartments();
     }
-  }, [hasConfigAccess, user, isLoading, router]);
+  }, [hasConfigAccess, user, isLoading, permRefreshed]);
 
 
 
@@ -210,7 +218,7 @@ export default function SettingsPage() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || !permRefreshed) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center min-h-[400px]">

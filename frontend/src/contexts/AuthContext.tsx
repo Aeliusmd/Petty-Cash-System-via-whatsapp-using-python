@@ -34,6 +34,8 @@ interface AuthContextType {
   // New: Permission-based check
   hasPermission: (permissionCode: string) => boolean;
   hasAnyPermission: (permissionCodes: string[]) => boolean;
+  // Trigger an immediate permissions refresh from the server
+  refreshPermissions: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -394,6 +396,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isInOrganization,
         hasPermission,
         hasAnyPermission,
+        refreshPermissions: async () => { if (token) await refreshPermissions(token); },
       }}
     >
       {children}

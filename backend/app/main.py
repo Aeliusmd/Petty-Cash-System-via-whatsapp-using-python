@@ -32,6 +32,7 @@ from app.controllers.configuration_controller import router as config_router
 from app.controllers.role_controller import router as role_router
 from app.controllers.provisioning_controller import router as provisioning_router
 from app.controllers.mobile_controller import router as mobile_router
+from app.controllers.event_controller import router as event_router
 
 # Import webhook handler (will be moved to controller in next phase)
 from app.webhooks import webhook_router
@@ -131,6 +132,9 @@ app.include_router(webhook_router)
 
 # Mobile BFF Router
 app.include_router(mobile_router)
+
+# Server-Sent Events (SSE)
+app.include_router(event_router)
 
 
 # ============================================================

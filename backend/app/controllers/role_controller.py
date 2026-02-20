@@ -4,6 +4,7 @@ from app.controllers.base import BaseController
 from app.services.role_service import RoleService
 from app.schemas.role import RoleResponse, RoleCreate, RoleUpdate, PermissionResponse
 from app.utils.auth import require_permission, get_current_user
+from app.services.event_service import event_service
 
 class RoleController(BaseController):
     """Controller for Role Management"""
@@ -108,6 +109,11 @@ class RoleController(BaseController):
                  
             # Fetch permissions
             perms = await self.role_service.get_role_direct_permissions(role.id)
+            
+            # Notify all users with this role to immediately refresh their permissions
+            if data.permission_codes is not None:
+                 await event_service.notify_group(role.id, "PERMISSIONS_UPDATED")
+                 
             role_dict = dict(role)
             role_dict['permissions'] = perms
             return role_dict

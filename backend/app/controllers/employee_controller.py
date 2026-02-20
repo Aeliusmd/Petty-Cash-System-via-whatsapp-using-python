@@ -11,6 +11,7 @@ from app.schemas.employee import (
     EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeListResponse
 )
 from app.utils.auth import require_permission, require_authenticated
+from app.services.event_service import event_service
 
 class EmployeeController(BaseController):
     """Controller for employee management endpoints"""
@@ -120,6 +121,9 @@ class EmployeeController(BaseController):
         
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
+            
+        # Notify the specific employee's active browsers to refresh permissions instantly
+        await event_service.notify_employee(employee_id, "PERMISSIONS_UPDATED")
         
         return self.success_response(data=employee.to_dict(), message="Employee updated successfully")
     

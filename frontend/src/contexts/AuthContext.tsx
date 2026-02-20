@@ -240,13 +240,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     scheduleRefresh(accessToken);
   };
 
-  // ── Background permission polling ─────────────────────────────────────────
-  // Poll /api/auth/me every 30 s while the user is logged in so that
-  // admin-side role/permission changes are reflected automatically.
-  // Also refreshes immediately when the user makes the tab visible again.
+  // ── Background permission polling + SSE Real-Time Updates ──────────────────
   useEffect(() => {
     if (!token) {
-      // Not logged in – clear any lingering interval
       if (permissionPollRef.current) {
         clearInterval(permissionPollRef.current);
         permissionPollRef.current = null;
@@ -254,17 +250,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Start polling every 30 s (skips when tab is hidden)
-    const POLL_INTERVAL_MS = 30_000;
-
+    // 1. Fallback polling (every 5 minutes instead of 30s to save resources)
+    const POLL_INTERVAL_MS = 5 * 60 * 1000;
     const poll = () => {
       if (document.visibilityState === 'hidden') return;
       refreshPermissions(token);
     };
-
     permissionPollRef.current = setInterval(poll, POLL_INTERVAL_MS);
 
-    // Also refresh immediately when the tab becomes visible again
+    // 2. Refresh immediately when the tab becomes visible again
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         refreshPermissions(token);
@@ -272,12 +266,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // 3. Setup Server-Sent Events (SSE) for instant role updates
+    const eventSource = new EventSource(`${API_BASE_URL}/api/events/stream?token=${token}`);
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'PERMISSIONS_UPDATED') {
+          console.log('⚡ Received real-time permission update signal! Refreshing UI...');
+          refreshPermissions(token);
+        }
+      } catch (e) {
+        console.error('Error parsing SSE message:', e);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('SSE Connection Error:', error);
+      // Wait a bit before retry by closing and letting browser reconnect/handling in hook deps
+      // Browsers auto-reconnect EventSource but we can manually manage if needed.
+    };
+
     return () => {
       if (permissionPollRef.current) {
         clearInterval(permissionPollRef.current);
         permissionPollRef.current = null;
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      eventSource.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]); // Re-run whenever token changes (login/logout)

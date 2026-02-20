@@ -21,7 +21,6 @@ export default function OrganizationsPage() {
   const { isSuperAdmin, token, enterOrganization, isLoading } = useAuth();
   const [units, setUnits] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
-  const [accessDenied, setAccessDenied] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Organization | null>(null);
   const [formData, setFormData] = useState({ code: '', name: '' });
@@ -32,10 +31,7 @@ export default function OrganizationsPage() {
 
     // Check super admin access
     if (!isSuperAdmin) {
-      setAccessDenied(true);
-      setLoading(false);
-      // Redirect after showing message
-      setTimeout(() => router.push('/'), 2000);
+      router.push('/');
       return;
     }
     fetchUnits();
@@ -148,14 +144,7 @@ export default function OrganizationsPage() {
 
   return (
     <div className="container mx-auto p-6">
-      {accessDenied ? (
-        <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <div className="text-red-500 text-6xl mb-4">🚫</div>
-          <h1 className="text-2xl font-bold text-red-600 mb-2">Access Denied</h1>
-          <p className="text-gray-600">Super Admin privileges required to access this page.</p>
-          <p className="text-gray-400 text-sm mt-2">Redirecting to dashboard...</p>
-        </div>
-      ) : loading ? (
+      {loading ? (
         <p>Loading...</p>
       ) : (
         <>

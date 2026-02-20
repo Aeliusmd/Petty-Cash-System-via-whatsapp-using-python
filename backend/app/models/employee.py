@@ -144,7 +144,7 @@ class Employee(BaseModel):
             FROM employees e
             LEFT JOIN grades g ON e.grade_id = g.id
             LEFT JOIN units u ON e.unit_id = u.id
-            LEFT JOIN organizations o ON u.organization_id = o.id
+            LEFT JOIN organizations o ON o.id = COALESCE(e.organization_id, u.organization_id)
             LEFT JOIN locations l ON e.location_id = l.id
             LEFT JOIN employees m ON e.manager_id = m.id
             WHERE (
@@ -174,7 +174,7 @@ class Employee(BaseModel):
             FROM employees e
             LEFT JOIN grades g ON e.grade_id = g.id
             LEFT JOIN units u ON e.unit_id = u.id
-            LEFT JOIN organizations o ON u.organization_id = o.id
+            LEFT JOIN organizations o ON o.id = COALESCE(e.organization_id, u.organization_id)
             LEFT JOIN locations l ON e.location_id = l.id
             LEFT JOIN employees m ON e.manager_id = m.id
             WHERE e.whatsapp_chat_id = $1 AND e.is_active = TRUE
@@ -194,7 +194,7 @@ class Employee(BaseModel):
             FROM employees e
             LEFT JOIN grades g ON e.grade_id = g.id
             LEFT JOIN units u ON e.unit_id = u.id
-            LEFT JOIN organizations o ON u.organization_id = o.id
+            LEFT JOIN organizations o ON o.id = COALESCE(e.organization_id, u.organization_id)
             LEFT JOIN locations l ON e.location_id = l.id
             WHERE e.id = $1
         """, employee_id)

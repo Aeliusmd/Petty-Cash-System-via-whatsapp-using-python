@@ -239,7 +239,7 @@ export default function SettingsPage() {
     );
   }
 
-  // Removed Access Denied block to allow read-only access for all org members
+  // Settings page is accessible to all authenticated org members (read-only for non-config users)
   if (!user?.organization_id && !isLoading && permRefreshed) {
     return (
       <div className="container mx-auto p-6">

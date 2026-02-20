@@ -13,6 +13,7 @@ interface Claim {
   claim_number: string;
   employee_name: string;
   employee_code: string;
+  employee_id: number;
   category_name: string;
   category_code: string;
   location_name: string | null;

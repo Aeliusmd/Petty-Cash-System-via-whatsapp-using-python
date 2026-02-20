@@ -39,6 +39,11 @@ interface Employee {
   employee_code: string;
 }
 
+interface Unit {
+  id: number;
+  name: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 function formatCurrency(amount: number | null): string {
@@ -94,6 +99,11 @@ function ClaimsContent() {
   const paramEmployeeId = searchParams.get('employee_id');
   const [activeStatus, setActiveStatus] = useState(statusFilter);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(paramEmployeeId || '');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [unitId, setUnitId] = useState<string>('');
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -148,6 +158,7 @@ function ClaimsContent() {
     }
     
     fetchEmployees();
+    fetchUnits();
   }, [isLoading, isAuthenticated, canViewAllClaims, router]);
 
 
@@ -160,7 +171,7 @@ function ClaimsContent() {
     }, 10000);
     
     return () => clearInterval(interval);
-  }, [activeStatus, selectedEmployeeId, currentPage, itemsPerPage]);
+  }, [activeStatus, selectedEmployeeId, unitId, startDate, endDate, currentPage, itemsPerPage]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -182,6 +193,25 @@ function ClaimsContent() {
     }
   }
 
+  async function fetchUnits() {
+    try {
+      const userStr = localStorage.getItem('auth_user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      const organizationId = user?.organization_id;
+      
+      const url = organizationId
+        ? `${API_BASE_URL}/api/units?organization_id=${organizationId}`
+        : `${API_BASE_URL}/api/units`;
+      const res = await authenticatedFetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setUnits(data.units || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch units', err);
+    }
+  }
+
   async function fetchClaims(silent = false) {
     // Only show loading state if not a silent background refresh
     if (!silent) {
@@ -194,6 +224,15 @@ function ClaimsContent() {
       }
       if (selectedEmployeeId) {
         params.set('employee_id', selectedEmployeeId);
+      }
+      if (unitId) {
+        params.set('unit_id', unitId);
+      }
+      if (startDate) {
+        params.set('start_date', startDate);
+      }
+      if (endDate) {
+        params.set('end_date', endDate);
       }
       // Add pagination params
       params.set('limit', itemsPerPage.toString());
@@ -394,6 +433,19 @@ function ClaimsContent() {
         {/* New Claim Button - only visible with claims.create permission */}
         <div className="flex gap-2">
           <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`px-4 py-2 border rounded-lg transition-all font-medium shadow-sm flex items-center gap-2 ${
+              showFilters || startDate || endDate || unitId || selectedEmployeeId
+                ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <span>🔍</span> Filters
+            {(startDate || endDate || unitId || selectedEmployeeId) && (
+              <span className="bg-indigo-600 text-white text-xs px-2 py-0.5 rounded-full ml-1">Active</span>
+            )}
+          </button>
+          <button
             onClick={() => setShowExportModal(true)}
             className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all font-medium shadow-sm flex items-center gap-2"
           >
@@ -421,7 +473,13 @@ function ClaimsContent() {
       <ExportClaimsModal
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
-        organizationId={user?.organization_id}
+        activeFilters={{
+          status: activeStatus,
+          employeeId: selectedEmployeeId,
+          unitId: unitId,
+          startDate: startDate,
+          endDate: endDate
+        }}
       />
 
       {/* Filters Section */}
@@ -495,6 +553,68 @@ function ClaimsContent() {
           </div>
         </div>
       </div>
+
+      {/* Advanced Filters Panel */}
+      {showFilters && (
+        <div className="bg-white rounded-xl shadow-md p-4 animate-in slide-in-from-top-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Department Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+              <select
+                value={unitId}
+                onChange={(e) => { setUnitId(e.target.value); setCurrentPage(1); }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="">All Departments</option>
+                {units.map((unit) => (
+                  <option key={unit.id} value={unit.id}>
+                    {unit.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Start Date */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+
+            {/* End Date */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => {
+                setUnitId('');
+                setStartDate('');
+                setEndDate('');
+                setSelectedEmployeeId('');
+                setEmployeeSearch('');
+                setActiveStatus('');
+                setCurrentPage(1);
+              }}
+              className="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1"
+            >
+              <span>✕</span> Clear All Filters
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error State */}
       {error && (

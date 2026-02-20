@@ -113,6 +113,9 @@ class ClaimController(BaseController):
         limit: int = 50,
         offset: int = 0,
         employee_id: Optional[int] = None,
+        unit_id: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
         auth: dict = Depends(require_authenticated)
     ):
         """Get claims - filtered by permissions"""
@@ -145,7 +148,10 @@ class ClaimController(BaseController):
             status=status,
             limit=limit,
             offset=offset,
-            organization_id=organization_id
+            organization_id=organization_id,
+            unit_id=unit_id,
+            start_date=start_date,
+            end_date=end_date
         )
         
         return {

@@ -158,6 +158,7 @@ class Claim(BaseModel):
                    cat.code as category_code, cat.name as category_name,
                    l.name as location_name, s.code as status_code, s.name as status_name,
                    u.name as unit_name, m.name as manager_name,
+                   a.name as approver_name,
                    COALESCE(
                        (SELECT SUM(r.ocr_amount) FROM claim_receipts r WHERE r.claim_id = c.id),
                        c.system_amount,
@@ -170,6 +171,7 @@ class Claim(BaseModel):
             JOIN claim_statuses s ON c.status_id = s.id
             LEFT JOIN units u ON e.unit_id = u.id
             LEFT JOIN employees m ON c.manager_id = m.id
+            LEFT JOIN employees a ON c.approved_by = a.id
             WHERE {where_clause}
             ORDER BY c.created_at DESC
         """
@@ -181,13 +183,14 @@ class Claim(BaseModel):
             claim = cls(row)
             claim.unit_name = row.get('unit_name')
             claim.manager_name = row.get('manager_name')
+            claim.approver_name = row.get('approver_name')
             claim.receipt_total = float(row.get('receipt_total') or 0)
             claims.append(claim)
             
         return claims
 
     @classmethod
-    async def find_by_employee(cls, employee_id: int = None, status: str = None, limit: int = 10, offset: int = 0, organization_id: int = None) -> tuple[List['Claim'], int]:
+    async def find_by_employee(cls, employee_id: int = None, status: str = None, limit: int = 10, offset: int = 0, organization_id: int = None, unit_id: int = None, start_date: date = None, end_date: date = None) -> tuple[List['Claim'], int]:
         """Find claims by employee, optionally filtered by status and organization. Returns (claims, total_count)"""
         # Base query conditions
         where_conditions = ["1=1"]
@@ -197,6 +200,21 @@ class Claim(BaseModel):
         if employee_id is not None:
             where_conditions.append(f"c.employee_id = ${arg_idx}")
             args.append(employee_id)
+            arg_idx += 1
+        
+        if unit_id is not None:
+            where_conditions.append(f"e.unit_id = ${arg_idx}")
+            args.append(unit_id)
+            arg_idx += 1
+            
+        if start_date:
+            where_conditions.append(f"c.claim_date >= ${arg_idx}")
+            args.append(start_date)
+            arg_idx += 1
+            
+        if end_date:
+            where_conditions.append(f"c.claim_date <= ${arg_idx}")
+            args.append(end_date)
             arg_idx += 1
         
         if status:
@@ -709,9 +727,9 @@ async def find_by_number(claim_number: str):
     claim = await Claim.find_by_number(claim_number)
     return claim.to_dict() if claim else None
 
-async def find_by_employee(employee_id: int, status: str = None, limit: int = 10, offset: int = 0, organization_id: int = None):
-    claims = await Claim.find_by_employee(employee_id, status, limit, offset, organization_id)
-    return [c.to_dict() for c in claims]
+async def find_by_employee(employee_id: int = None, status: str = None, limit: int = 10, offset: int = 0, organization_id: int = None, unit_id: int = None, start_date: date = None, end_date: date = None):
+    claims, total_count = await Claim.find_by_employee(employee_id, status, limit, offset, organization_id, unit_id, start_date, end_date)
+    return [c.to_dict() for c in claims], total_count
 
 async def find_pending_for_manager(manager_id: int, organization_id: int = None):
     claims = await Claim.find_pending_for_manager(manager_id, organization_id)

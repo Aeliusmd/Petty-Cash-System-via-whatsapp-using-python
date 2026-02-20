@@ -45,10 +45,13 @@ class ClaimService(BaseService):
         status: str = None,
         limit: int = 10,
         offset: int = 0,
-        organization_id: int = None
+        organization_id: int = None,
+        unit_id: int = None,
+        start_date: date = None,
+        end_date: date = None
     ) -> Dict[str, Any]:
         """Get claims for an employee, filtered by organization. Returns {'claims': [], 'total': int}"""
-        claims, total = await Claim.find_by_employee(employee_id, status, limit, offset, organization_id)
+        claims, total = await Claim.find_by_employee(employee_id, status, limit, offset, organization_id, unit_id, start_date, end_date)
         return {'claims': claims, 'total': total}
     
     async def get_pending_claims_for_manager(self, manager_id: int, organization_id: int = None) -> List[Claim]:
@@ -438,8 +441,9 @@ class ClaimService(BaseService):
                 user_amt = float(claim.user_amount) if claim.user_amount is not None else 0.0
                 rec_total = getattr(claim, 'receipt_total', 0.0) or 0.0
                 diff = abs(user_amt - rec_total)
-                # For approved claims use final_amount; for others use receipt total as best estimate
-                final_amt = float(claim.final_amount) if claim.final_amount is not None else (rec_total or user_amt)
+                # Check status
+                is_approved = claim.status_code == 'APPROVED'
+                final_amt = float(claim.final_amount) if claim.final_amount is not None else 0.0
                 
                 writer.writerow([
                     claim.claim_number,
@@ -452,9 +456,9 @@ class ClaimService(BaseService):
                     f"{user_amt:.2f}",
                     f"{rec_total:.2f}",
                     f"{diff:.2f}",
-                    f"{final_amt:.2f}",
+                    f"{final_amt:.2f}" if is_approved else '',
                     claim.status_name,
-                    claim.manager_name or ''
+                    claim.approver_name if is_approved and getattr(claim, 'approver_name', None) else ''
                 ])
                 
             # Convert to bytes
@@ -478,8 +482,9 @@ class ClaimService(BaseService):
                 user_amt = float(claim.user_amount) if claim.user_amount is not None else 0.0
                 rec_total = getattr(claim, 'receipt_total', 0.0) or 0.0
                 diff = abs(user_amt - rec_total)
-                # For approved claims use final_amount; for others use receipt total as best estimate
-                final_amt = float(claim.final_amount) if claim.final_amount is not None else (rec_total or user_amt)
+                # Check status
+                is_approved = claim.status_code == 'APPROVED'
+                final_amt = float(claim.final_amount) if claim.final_amount is not None else 0.0
 
                 ws.cell(row=row_num, column=1, value=claim.claim_number)
                 ws.cell(row=row_num, column=2, value=claim.claim_date.strftime('%Y-%m-%d') if claim.claim_date else '')
@@ -491,9 +496,9 @@ class ClaimService(BaseService):
                 ws.cell(row=row_num, column=8, value=user_amt)
                 ws.cell(row=row_num, column=9, value=rec_total)
                 ws.cell(row=row_num, column=10, value=diff)
-                ws.cell(row=row_num, column=11, value=final_amt)
+                ws.cell(row=row_num, column=11, value=final_amt if is_approved else '')
                 ws.cell(row=row_num, column=12, value=claim.status_name)
-                ws.cell(row=row_num, column=13, value=claim.manager_name or '')
+                ws.cell(row=row_num, column=13, value=claim.approver_name if is_approved and getattr(claim, 'approver_name', None) else '')
             
             # Adjust column widths
             for col in ws.columns:

@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     ip_address VARCHAR(50),
     user_agent TEXT,
     session_id VARCHAR(100),
-    organization_id INT REFERENCES units(id),
+    organization_id INT REFERENCES organizations(id),
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -143,10 +143,10 @@ class AuditLog(BaseModel):
         query = f"""
             SELECT 
                 a.*, e.name as performed_by_name, e.employee_code as performed_by_code,
-                u.name as organization_name
+                o.name as organization_name
             FROM audit_logs a
             LEFT JOIN employees e ON a.performed_by = e.id
-            LEFT JOIN units u ON a.organization_id = u.id
+            LEFT JOIN organizations o ON a.organization_id = o.id
             WHERE {where_clause}
             ORDER BY a.created_at DESC
             LIMIT ${param_count} OFFSET ${param_count + 1}
@@ -212,10 +212,10 @@ class AuditLog(BaseModel):
         row = await db.query_one("""
             SELECT 
                 a.*, e.name as performed_by_name, e.employee_code as performed_by_code,
-                u.name as organization_name
+                o.name as organization_name
             FROM audit_logs a
             LEFT JOIN employees e ON a.performed_by = e.id
-            LEFT JOIN units u ON a.organization_id = u.id
+            LEFT JOIN organizations o ON a.organization_id = o.id
             WHERE a.id = $1
         """, audit_log_id)
         return cls(dict(row)) if row else None

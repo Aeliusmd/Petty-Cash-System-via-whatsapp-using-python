@@ -26,10 +26,14 @@ class EventService:
         
         try:
             while True:
-                # Wait for an event to be put into the queue
-                event_data = await queue.get()
-                # SSE format requires 'data: ...\n\n'
-                yield f"data: {json.dumps(event_data)}\n\n"
+                try:
+                    # Wait for an event with a 15-second timeout
+                    event_data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    # SSE format requires 'data: ...\n\n'
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send a comment as a heartbeat to keep connection alive and flush proxies
+                    yield ": heartbeat\n\n"
         except asyncio.CancelledError:
             # Client disconnected
             print(f"📡 SSE client disconnected for employee {employee_id}")

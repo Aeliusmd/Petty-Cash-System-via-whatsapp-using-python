@@ -92,26 +92,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Silently refresh user data (permissions) from the server
-  const refreshPermissions = useCallback(async (currentToken: string) => {
-    if (!currentToken) return;
+  const refreshPermissions = useCallback(async (accessToken: string) => {
+    if (!accessToken) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        headers: { 'Authorization': `Bearer ${currentToken}` }
+      const res = await fetch(`${API_BASE_URL}/api/auth/me?_t=${Date.now()}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
       });
+      
       if (res.ok) {
         const freshUserData = await res.json();
         setUser(freshUserData);
         localStorage.setItem('auth_user', JSON.stringify(freshUserData));
       } else if (res.status === 401) {
-        // Token expired mid-session – try refresh
-        await refreshSession();
+        console.log('🔄 Token expired during permission refresh, attempting refresh...');
+        if (refreshToken) {
+          await refreshSession();
+        } else {
+          logout();
+        }
       }
     } catch {
       // Network error – silently ignore, we'll retry next interval
     }
-  }, []);
+  }, [refreshToken, logout, refreshSession]);
 
-  const refreshSession = async () => {
+  async function refreshSession() {
     const storedRefreshToken = localStorage.getItem('refresh_token');
     if (!storedRefreshToken) return;
 
@@ -301,7 +310,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 
 
-  const logout = () => {
+  function logout() {
     // Stop permission polling
     if (permissionPollRef.current) {
       clearInterval(permissionPollRef.current);

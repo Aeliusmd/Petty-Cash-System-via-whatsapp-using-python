@@ -54,9 +54,13 @@ class AuthService(BaseService):
         Returns None if verification fails.
         """
         if not await OTP.verify(phone_number, otp_code):
+            # Try to find employee to get organization_id for the log
+            employee = await Employee.find_by_phone(phone_number)
+            org_id = employee.organization_id if employee else None
             await self.audit_service.log_auth_action(
                 action='OTP_FAILED',
-                metadata={'phone_number': phone_number}
+                metadata={'phone_number': phone_number},
+                organization_id=org_id
             )
             return None
         
@@ -75,7 +79,8 @@ class AuthService(BaseService):
         
         await self.audit_service.log_auth_action(
             action='LOGIN',
-            employee_id=employee.id
+            employee_id=employee.id,
+            organization_id=employee.organization_id
         )
         
         return {
@@ -164,9 +169,13 @@ class AuthService(BaseService):
     
     async def logout(self, employee_id: int) -> bool:
         """Log logout event"""
+        employee = await Employee.find_by_id(employee_id)
+        org_id = employee.organization_id if employee else None
+        
         await self.audit_service.log_auth_action(
             action='LOGOUT',
-            employee_id=employee_id
+            employee_id=employee_id,
+            organization_id=org_id
         )
         return True
     

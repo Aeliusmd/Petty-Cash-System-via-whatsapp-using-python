@@ -9,9 +9,9 @@ from typing import Dict, Any, Optional
 def format_claim_description(log: Dict[str, Any]) -> str:
     """Generate human-readable description for claim audit logs"""
     action = log.get('action', '')
-    old_values = log.get('old_values', {})
-    new_values = log.get('new_values', {})
-    metadata = log.get('metadata', {})
+    old_values = log.get('old_values') or {}
+    new_values = log.get('new_values') or {}
+    metadata = log.get('metadata') or {}
     performed_by = log.get('performed_by_name', 'System')
     claim_number = metadata.get('claim_number', f"#{log.get('entity_id')}")
     
@@ -53,9 +53,9 @@ def format_claim_description(log: Dict[str, Any]) -> str:
 def format_employee_description(log: Dict[str, Any]) -> str:
     """Generate human-readable description for employee audit logs"""
     action = log.get('action', '')
-    old_values = log.get('old_values', {})
-    new_values = log.get('new_values', {})
-    metadata = log.get('metadata', {})
+    old_values = log.get('old_values') or {}
+    new_values = log.get('new_values') or {}
+    metadata = log.get('metadata') or {}
     performed_by = log.get('performed_by_name', 'System')
     employee_name = metadata.get('employee_name', f"Employee #{log.get('entity_id')}")
     
@@ -87,7 +87,7 @@ def format_employee_description(log: Dict[str, Any]) -> str:
 def format_auth_description(log: Dict[str, Any]) -> str:
     """Generate human-readable description for auth audit logs"""
     action = log.get('action', '')
-    metadata = log.get('metadata', {})
+    metadata = log.get('metadata') or {}
     performed_by = log.get('performed_by_name', 'Unknown User')
     
     if action == 'LOGIN':
@@ -116,7 +116,7 @@ def format_auth_description(log: Dict[str, Any]) -> str:
 def format_organization_description(log: Dict[str, Any]) -> str:
     """Generate human-readable description for organization audit logs"""
     action = log.get('action', '')
-    metadata = log.get('metadata', {})
+    metadata = log.get('metadata') or {}
     performed_by = log.get('performed_by_name', 'System')
     org_name = log.get('organization_name', f"Organization #{log.get('entity_id')}")
     
@@ -141,7 +141,7 @@ def format_organization_description(log: Dict[str, Any]) -> str:
 def format_receipt_description(log: Dict[str, Any]) -> str:
     """Generate human-readable description for receipt audit logs"""
     action = log.get('action', '')
-    metadata = log.get('metadata', {})
+    metadata = log.get('metadata') or {}
     performed_by = log.get('performed_by_name', 'System')
     claim_number = metadata.get('claim_number', 'Unknown')
     file_name = metadata.get('file_name', 'receipt')
@@ -166,9 +166,9 @@ def format_receipt_description(log: Dict[str, Any]) -> str:
 def format_config_description(log: Dict[str, Any]) -> str:
     """Generate human-readable description for configuration audit logs"""
     action = log.get('action', '')
-    old_values = log.get('old_values', {})
-    new_values = log.get('new_values', {})
-    metadata = log.get('metadata', {})
+    old_values = log.get('old_values') or {}
+    new_values = log.get('new_values') or {}
+    metadata = log.get('metadata') or {}
     performed_by = log.get('performed_by_name', 'System')
     entity_type = log.get('entity_type', '')
     entity_id = log.get('entity_id', 'Unknown')

@@ -17,6 +17,7 @@ class EmployeeBase(BaseModel):
     unit_id: Optional[int] = None
     location_id: Optional[int] = None
     manager_id: Optional[int] = None
+    approval_policy_id: Optional[int] = None
     role: str = "staff"
     is_admin: bool = False
     is_manager: bool = False
@@ -40,6 +41,7 @@ class EmployeeUpdate(BaseModel):
     unit_id: Optional[int] = None
     location_id: Optional[int] = None
     manager_id: Optional[int] = None
+    approval_policy_id: Optional[int] = None
     role: Optional[str] = None
     role_id: Optional[int] = None  # RBAC role ID
     is_active: Optional[bool] = None
@@ -76,6 +78,7 @@ class EmployeeResponse(BaseModel):
     location_code: Optional[str] = None
     location_name: Optional[str] = None
     manager_id: Optional[int] = None
+    approval_policy_id: Optional[int] = None
     manager_name: Optional[str] = None
     manager_phone: Optional[str] = None
     spending_limit: Optional[float] = None

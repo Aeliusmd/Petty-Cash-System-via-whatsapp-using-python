@@ -94,7 +94,18 @@ class AuthController(BaseController):
         perms = await employee.get_permissions()
         employee.permissions = perms
         
-        return employee.to_dict()
+        result = employee.to_dict()
+        
+        # For super admins, preserve the entered organization context from the JWT.
+        # Without this, refreshPermissions() would overwrite the entered org
+        # (e.g. org 27) with the super admin's own DB org (always org 1 / MedCube).
+        if auth.get('role') == 'super_admin':
+            if auth.get('organization_id'):
+                result['organization_id'] = auth['organization_id']
+            if auth.get('organization_name'):
+                result['organization_name'] = auth['organization_name']
+        
+        return result
 
 
 # Create controller instance and export router

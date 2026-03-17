@@ -66,6 +66,7 @@ class ClaimService(BaseService):
     ) -> Claim:
         """Create new claim with audit logging"""
         claim = await Claim.create(data)
+        await Claim.initialize_approval_workflow(claim.id)
         
         # Record initial status
         await Claim.record_status_change(
@@ -100,22 +101,31 @@ class ClaimService(BaseService):
             'final_amount': current.final_amount
         }
         
-        claim = await Claim.approve(claim_id, approver_id, final_amount)
+        workflow_result = await Claim.approve_step(claim_id, approver_id, final_amount)
+        claim = workflow_result["claim"]
         
         # Record status change
-        await Claim.record_status_change(
-            claim_id, current.status_code, 'APPROVED', approver_id,
-            f'Claim approved. Final amount: {claim.final_amount}'
-        )
+        next_assignee_id = workflow_result.get("next_assignee_id")
+        if workflow_result.get("is_final"):
+            await Claim.record_status_change(
+                claim_id, current.status_code, 'APPROVED', approver_id,
+                f'Claim approved. Final amount: {claim.final_amount}'
+            )
+        else:
+            await Claim.record_status_change(
+                claim_id, current.status_code, current.status_code, approver_id,
+                f"Step {workflow_result.get('approved_step')} approved. Routed to next approver."
+            )
         
         await self.audit_service.log_claim_action(
             claim_id=claim_id,
             action='APPROVE',
             old_values=old_values,
             new_values={
-                'status_code': 'APPROVED',
+                'status_code': claim.status_code,
                 'final_amount': claim.final_amount,
-                'approved_by': approver_id
+                'approved_by': approver_id,
+                'next_assignee_id': next_assignee_id
             },
             performed_by=approver_id,
             organization_id=organization_id
@@ -140,7 +150,8 @@ class ClaimService(BaseService):
             'rejection_reason': current.rejection_reason
         }
         
-        claim = await Claim.reject(claim_id, approver_id, reason)
+        workflow_result = await Claim.reject_step(claim_id, approver_id, reason)
+        claim = workflow_result["claim"]
         
         # Record status change
         await Claim.record_status_change(

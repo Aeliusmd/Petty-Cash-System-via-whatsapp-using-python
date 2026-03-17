@@ -67,6 +67,21 @@ class ProvisioningService(BaseService):
         
         unit_id = unit_result[0]['id'] if unit_result else None
         print(f"✅ Created Default Unit: {unit_result[0]['name']} (ID: {unit_id})")
+
+        # 3.1 Create default approval policy (single-step manager)
+        approval_policy = await db.query("""
+            INSERT INTO approval_policies (organization_id, unit_id, name, is_default, is_active)
+            VALUES ($1, $2, $3, TRUE, TRUE)
+            RETURNING id, name
+        """, org.id, unit_id, "Default Department Approval")
+        approval_policy_id = approval_policy[0]["id"] if approval_policy else None
+        if approval_policy_id:
+            await db.execute("""
+                INSERT INTO approval_policy_steps (policy_id, step_order, role_type, is_required)
+                VALUES ($1, 1, 'MANAGER', TRUE)
+                ON CONFLICT (policy_id, step_order) DO NOTHING
+            """, approval_policy_id)
+            print(f"✅ Created Default Approval Policy (ID: {approval_policy_id})")
         
         # 4. Create Admin Role with ALL permissions (scoped to this org)
         admin_role = await Role.create({
@@ -130,6 +145,10 @@ class ProvisioningService(BaseService):
             'unit': {
                 'id': unit_id,
                 'name': 'Default Unit'
+            },
+            'approval_policy': {
+                'id': approval_policy_id,
+                'name': 'Default Department Approval'
             },
             'admin_role': {
                 'id': admin_role.id,

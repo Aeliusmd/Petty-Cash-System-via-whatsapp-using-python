@@ -63,13 +63,60 @@ class Organization(BaseModel):
     
     @classmethod
     async def create(cls, data: Dict[str, Any]) -> 'Organization':
-        """Create new organization"""
+        """Create new organization and initialize default departments"""
         rows = await db.query("""
             INSERT INTO organizations (code, name, description, is_active)
             VALUES ($1, $2, $3, $4)
             RETURNING id, code, name, description, is_active, created_at, updated_at
         """, data['code'], data['name'], data.get('description'), data.get('is_active', True))
-        return cls(rows[0]) if rows else None
+        
+        org = cls(rows[0]) if rows else None
+        
+        if org:
+            # Create default departments for the new organization
+            default_units = [
+                ('FIN', 'Finance'),
+                ('HR', 'Human Resources'),
+                ('IT', 'Information Technology'),
+                ('OPS', 'Operations'),
+                ('SALES', 'Sales'),
+                ('ADMIN', 'Administration'),
+                ('MKT', 'Marketing')
+            ]
+            for code, name in default_units:
+                await db.execute("""
+                    INSERT INTO units (code, name, organization_id, is_active)
+                    VALUES ($1, $2, $3, TRUE)
+                    ON CONFLICT DO NOTHING
+                """, code, name, org.id)
+                
+            # Create default roles for the new organization
+            default_roles = [
+                ('admin', 'Admin', 'Organization administrator'),
+                ('manager', 'Manager', 'Team manager with approval rights'),
+                ('finance', 'Finance', 'Finance officer'),
+                ('staff', 'Staff', 'Standard employee role')
+            ]
+            for r_code, r_name, r_desc in default_roles:
+                rows = await db.query("""
+                    INSERT INTO roles (code, name, description, organization_id, is_system_role, is_active)
+                    VALUES ($1, $2, $3, $4, FALSE, TRUE)
+                    RETURNING id
+                """, r_code, r_name, r_desc, org.id)
+                
+                if rows:
+                    new_role_id = rows[0]['id']
+                    # Copy permissions from the template organization (org_id = 1)
+                    await db.execute("""
+                        INSERT INTO role_permissions (role_id, permission_id)
+                        SELECT $1, permission_id 
+                        FROM role_permissions rp
+                        JOIN roles r ON rp.role_id = r.id
+                        WHERE r.code = $2 AND r.organization_id = 1
+                        ON CONFLICT DO NOTHING
+                    """, new_role_id, r_code)
+                    
+        return org
     
     @classmethod
     async def update(cls, org_id: int, data: Dict[str, Any]) -> Optional['Organization']:

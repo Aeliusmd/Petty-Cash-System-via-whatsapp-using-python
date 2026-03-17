@@ -5,9 +5,19 @@ Sends WhatsApp notifications to staff for claim status updates
 
 from typing import Optional
 from pathlib import Path
+import re
 from app import waha_client
 from app.models import employee as employee_model
 from app.models import claim as claim_model
+
+
+def _claim_to_dict(claim) -> dict:
+    """Accept either Claim model instance or plain dict."""
+    if isinstance(claim, dict):
+        return claim
+    if hasattr(claim, "to_dict"):
+        return claim.to_dict()
+    raise TypeError("Unsupported claim payload type")
 
 
 def format_currency(amount: float) -> str:
@@ -28,6 +38,7 @@ async def notify_staff_of_approval(claim: dict) -> bool:
         True if notification sent successfully
     """
     try:
+        claim = _claim_to_dict(claim)
         # Get employee details
         employee = await employee_model.find_by_id(claim['employee_id'])
         if not employee or not employee.get('whatsapp_chat_id'):
@@ -103,6 +114,7 @@ async def notify_staff_of_rejection(claim: dict, reason: str) -> bool:
         True if notification sent successfully
     """
     try:
+        claim = _claim_to_dict(claim)
         # Get employee details
         employee = await employee_model.find_by_id(claim['employee_id'])
         if not employee or not employee.get('whatsapp_chat_id'):
@@ -150,11 +162,9 @@ async def notify_staff_of_rejection(claim: dict, reason: str) -> bool:
 📋 Claim #: *{full_claim['claim_number']}*
 📁 Category: {full_claim.get('category_name', 'N/A')}
 💵 Amount: {format_currency(user_amount)}{receipt_section}
+📝 Reason: {reason}
 
-📝 *Reason:* {reason}
-
-💡 Reply *appeal* to request another review.
-Type "hi" or "menu" to submit a new claim."""
+You can appeal this decision by typing "appeal"."""
 
         await waha_client.send_text(chat_id, message)
         print(f"✅ Sent rejection notification to {employee['name']}")
@@ -162,6 +172,66 @@ Type "hi" or "menu" to submit a new claim."""
         
     except Exception as e:
         print(f"❌ Error sending rejection notification: {e}")
+        return False
+
+
+async def notify_staff_of_step_approval(claim: dict, approver_name: str, step_order: int, next_assignee_id: int = None) -> bool:
+    """Notify staff when an intermediate approval step is completed"""
+    try:
+        claim = _claim_to_dict(claim)
+        employee = await employee_model.find_by_id(claim['employee_id'])
+        if not employee or not employee.get('whatsapp_chat_id'):
+            return False
+            
+        full_claim = await claim_model.find_by_id(claim['id'])
+        user_amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
+        
+        # Get next approver name if available
+        next_approver_name = "the next approver"
+        if next_assignee_id:
+            next_approver = await employee_model.find_by_id(next_assignee_id)
+            if next_approver:
+                next_approver_name = next_approver.get('name', "the next approver")
+                
+        message = f"""⏳ *Claim Update: Step {step_order} Approved*
+
+📋 Claim #: *{full_claim['claim_number']}*
+💵 Amount: {format_currency(user_amount)}
+👤 Approved by: {approver_name}
+
+Your claim has passed step {step_order} and is moving to *{next_approver_name}* for the next stage of approval."""
+
+        await waha_client.send_text(employee['whatsapp_chat_id'], message)
+        return True
+    except Exception as e:
+        print(f"❌ Error sending step approval notification: {e}")
+        return False
+
+
+async def notify_staff_of_step_rejection(claim: dict, approver_name: str, step_order: int, reason: str) -> bool:
+    """Notify staff when an intermediate approval step is rejected"""
+    try:
+        claim = _claim_to_dict(claim)
+        employee = await employee_model.find_by_id(claim['employee_id'])
+        if not employee or not employee.get('whatsapp_chat_id'):
+            return False
+            
+        full_claim = await claim_model.find_by_id(claim['id'])
+        user_amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
+        
+        message = f"""❌ *Claim Update: Step {step_order} Rejected*
+
+📋 Claim #: *{full_claim['claim_number']}*
+💵 Amount: {format_currency(user_amount)}
+👤 Rejected by: {approver_name}
+📝 Reason: {reason}
+
+You can appeal this decision by typing "appeal"."""
+
+        await waha_client.send_text(employee['whatsapp_chat_id'], message)
+        return True
+    except Exception as e:
+        print(f"❌ Error sending step rejection notification: {e}")
         return False
 
 
@@ -192,6 +262,7 @@ async def notify_staff_of_appeal_submitted(claim: dict) -> bool:
         True if notification sent successfully
     """
     try:
+        claim = _claim_to_dict(claim)
         # Get employee details
         employee = await employee_model.find_by_id(claim['employee_id'])
         if not employee or not employee.get('whatsapp_chat_id'):
@@ -234,6 +305,7 @@ async def notify_manager_of_appeal(claim: dict, notes: str = None) -> bool:
         True if notification sent successfully
     """
     try:
+        claim = _claim_to_dict(claim)
         # Get manager details
         manager_id = claim.get('manager_id')
         if not manager_id:
@@ -330,6 +402,7 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None, dupl
         True if notification sent successfully
     """
     try:
+        claim = _claim_to_dict(claim)
         # Get manager details
         manager_id = claim.get('manager_id')
         print(f"🔍 notify_manager_of_new_claim: claim_id={claim.get('id')}, manager_id={manager_id}")
@@ -545,5 +618,154 @@ async def notify_manager_of_new_claim(claim: dict, media_info: dict = None, dupl
     except Exception as e:
         import traceback
         print(f"❌ Error notifying manager of new claim: {e}")
+        traceback.print_exc()
+        return False
+
+
+async def notify_next_approver_of_claim(claim, duplicate_warnings: list = None) -> bool:
+    """
+    Notify next active approver when a multi-step claim advances or is created.
+    Sends full claim details and forwards receipt images, matching the quality
+    of notify_manager_of_new_claim.
+    """
+    try:
+        claim = _claim_to_dict(claim)
+        pending_task = await claim_model.get_current_pending_task(claim["id"])
+        if not pending_task:
+            print(f"No pending approval task found for claim {claim.get('id')} - skipping approver notification")
+            return False
+
+        approver_id = pending_task.get("assignee_employee_id")
+        if not approver_id:
+            print(f"Pending task for claim {claim.get('id')} has no assignee - skipping")
+            return False
+
+        approver = await employee_model.find_by_id(approver_id)
+        if not approver or not approver.get("whatsapp_chat_id"):
+            print(f"Approver {approver_id} has no whatsapp_chat_id - skipping")
+            return False
+
+        approver_chat_id = approver["whatsapp_chat_id"]
+        claimant = await employee_model.find_by_id(claim["employee_id"])
+        claimant_name = claimant.get("name", "Unknown") if claimant else "Unknown"
+        full_claim = await claim_model.find_by_id(claim["id"])
+        if not full_claim:
+            print(f"Could not fetch full claim {claim['id']}")
+            return False
+
+        amount = full_claim.get('user_amount') or full_claim.get('system_amount') or 0
+
+        is_advance = full_claim.get('claim_type') == 'advance'
+        claim_type_label = "Before Pay (Advance)" if is_advance else "After Pay (Reimbursement)"
+
+        receipts_from_db = await claim_model.get_receipts(claim['id'])
+
+        import os
+        base_url = os.getenv('PUBLIC_BACKEND_URL', 'http://localhost:4101')
+
+        receipt_section = ""
+        if receipts_from_db and len(receipts_from_db) > 0:
+            receipt_section = f"\n\n receipt *Receipts ({len(receipts_from_db)}):*"
+            total_from_receipts = 0
+            for i, receipt in enumerate(receipts_from_db, 1):
+                receipt_amount = receipt.get('ocr_amount') or 0
+                vendor = receipt.get('vendor') or 'Unknown'
+                file_path = receipt.get('file_path')
+                if file_path:
+                    filename = Path(file_path).name
+                    receipt_link = f"{base_url}/api/receipts/{claim['id']}/{filename}"
+                else:
+                    receipt_link = "N/A"
+                try:
+                    amount_display = float(receipt_amount) if receipt_amount is not None else 0.0
+                except (ValueError, TypeError):
+                    amount_display = 0.0
+                receipt_section += f"\n  {i}. Rs. {amount_display:,.0f} - {vendor}"
+                receipt_section += f"\n     {receipt_link}"
+                total_from_receipts += (float(receipt_amount) if receipt_amount is not None else 0)
+
+            if total_from_receipts > 0:
+                total_label = "Total from quotations:" if is_advance else "Total from receipts:"
+                receipt_section += f"\n\n *{total_label}* Rs. {total_from_receipts:,.0f}"
+                if amount > 0:
+                    amount_float = float(amount)
+                    total_float = float(total_from_receipts)
+                    diff = abs(total_float - amount_float)
+                    if diff > 0:
+                        diff_pct = (diff / amount_float) * 100
+                        receipt_section += f"\n *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
+        else:
+            receipt_section = "\n\nReceipt: Not provided"
+
+        duplicate_section = ""
+        if duplicate_warnings:
+            duplicate_section = "\n\n *POSSIBLE DUPLICATE INVOICE*"
+            for warning in duplicate_warnings:
+                if isinstance(warning, dict):
+                    duplicate_section += f"\n{warning.get('message', '')}"
+                else:
+                    duplicate_section += f"\n{warning}"
+
+        spending_warning = ""
+        try:
+            spending_summary = await claim_model.Claim.get_employee_spending_summary(claim['employee_id'])
+            if spending_summary and spending_summary.get('spending_limit'):
+                limit_val = float(spending_summary['spending_limit'])
+                available = float(spending_summary['available'])
+                current_amount = float(amount)
+                if current_amount > available:
+                    deficit = current_amount - available
+                    spending_warning = f"\n\n *SPENDING LIMIT EXCEEDED*"
+                    spending_warning += f"\nLimit: {format_currency(limit_val)}"
+                    spending_warning += f"\nAvailable: {format_currency(available)}"
+                    spending_warning += f"\nExceeds by: {format_currency(deficit)}"
+        except Exception as e:
+            print(f"Error checking spending limit for approver notification: {e}")
+
+        step_order = pending_task.get('step_order', '?')
+        role_type = pending_task.get('role_type', '')
+
+        message = f"""⏳ *Claim Waiting Your Approval*
+
+📋 Claim #: *{full_claim.get('claim_number', 'N/A')}*
+👤 Staff: {claimant_name}
+🏷️ Type: {claim_type_label}
+📁 Category: {full_claim.get('category_name', 'N/A')}
+📍 Location: {full_claim.get('location_name', 'N/A')}
+💵 Amount: {format_currency(amount)}
+📝 Details: {(full_claim.get('description') or 'N/A')[:100]}
+🔢 Step: {step_order}{f' ({role_type})' if role_type else ''}{receipt_section}{duplicate_section}{spending_warning}
+
+*Reply with one of:*
+✅ *Approve {claim['id']}*
+❌ *Reject {claim['id']} [reason]*"""
+
+        await waha_client.send_text(approver_chat_id, message)
+        print(f"Sent approval notification to {approver['name']} (step {step_order}) for claim {claim['id']}")
+
+        if receipts_from_db:
+            for i, receipt in enumerate(receipts_from_db, 1):
+                try:
+                    if receipt.get('message_id'):
+                        print(f"Forwarding receipt #{i} to approver {approver['name']}")
+                        await waha_client.forward_message(approver_chat_id, receipt['message_id'])
+                    elif receipt.get('file_path') and os.path.exists(receipt.get('file_path')):
+                        print(f"Sending receipt file #{i} to approver {approver['name']}")
+                        file_path = receipt['file_path']
+                        filename = receipt.get('file_name', f"receipt_{i}.jpg")
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                            await waha_client.send_image(approver_chat_id, file_path, caption=f"Receipt #{i} - {receipt.get('vendor', 'Unknown')}")
+                        else:
+                            await waha_client.send_file(approver_chat_id, file_path, caption=f"Receipt #{i} - {receipt.get('vendor', 'Unknown')}")
+                    else:
+                        print(f"Receipt #{i} has no message_id and file not found locally")
+                except Exception as e:
+                    print(f"Could not send receipt #{i} to approver: {e}")
+
+        return True
+    except Exception as e:
+        import traceback
+        print(f"Error notifying next approver: {e}")
         traceback.print_exc()
         return False

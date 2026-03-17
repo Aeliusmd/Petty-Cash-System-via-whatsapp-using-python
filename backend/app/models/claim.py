@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 from app.models.base import BaseModel
 from app.db.database import db
+from app.models.approval import ApprovalPolicy
 
 
 class Claim(BaseModel):
@@ -25,6 +26,8 @@ class Claim(BaseModel):
     location_id: int = None
     status_id: int = None
     manager_id: int = None
+    approval_policy_id: int = None
+    current_step_order: int = None
     approved_by: int = None
     claim_type: str = "outright"
     claim_date: date = None
@@ -261,29 +264,260 @@ class Claim(BaseModel):
     
     @classmethod
     async def find_pending_for_manager(cls, manager_id: int, organization_id: int = None) -> List['Claim']:
-        """Find pending claims for manager approval, filtered by organization"""
+        """Find pending claims for the current approver, filtered by organization."""
         query = """
             SELECT c.*, e.name as employee_name, e.employee_code, g.code as grade_code,
-                   cat.code as category_code, cat.name as category_name, l.name as location_name
+                   cat.code as category_code, cat.name as category_name, l.name as location_name,
+                   catask.id as approval_task_id, catask.step_order as approval_step_order
             FROM claims c
             JOIN employees e ON c.employee_id = e.id
+            LEFT JOIN grades g ON e.grade_id = g.id
             JOIN claim_categories cat ON c.category_id = cat.id
             LEFT JOIN locations l ON c.location_id = l.id
             JOIN claim_statuses s ON c.status_id = s.id
-            WHERE c.manager_id = $1 AND s.code = 'PENDING'
+            LEFT JOIN claim_approval_tasks catask ON catask.claim_id = c.id AND catask.status = 'PENDING'
+            WHERE (
+                catask.assignee_employee_id = $1
+                OR (catask.id IS NULL AND c.manager_id = $1)
+            )
+            AND s.code IN ('PENDING', 'APPEALED')
         """
-        args = [manager_id]
+        args: List[Any] = [manager_id]
         arg_idx = 2
-        
+
         if organization_id:
             query += f" AND e.organization_id = ${arg_idx}"
             args.append(organization_id)
             arg_idx += 1
-            
+
         query += " ORDER BY c.created_at ASC"
-        
         result = await db.query(query, *args)
         return [cls(row) for row in result]
+
+    @classmethod
+    async def get_current_pending_task(cls, claim_id: int) -> Optional[Dict[str, Any]]:
+        return await db.query_one(
+            """
+            SELECT cat.*, aps.role_type
+            FROM claim_approval_tasks cat
+            JOIN approval_policy_steps aps ON aps.id = cat.policy_step_id
+            WHERE cat.claim_id = $1 AND cat.status = 'PENDING'
+            ORDER BY cat.step_order ASC
+            LIMIT 1
+            """,
+            claim_id,
+        )
+
+    @classmethod
+    async def initialize_approval_workflow(cls, claim_id: int) -> Dict[str, Any]:
+        """Resolve policy and materialize workflow tasks for a claim."""
+        claim = await cls.find_by_id(claim_id)
+        if not claim:
+            raise ValueError("Claim not found")
+
+        # If employee has a direct manager, use legacy single-manager flow
+        emp_row = await db.query_one(
+            "SELECT manager_id FROM employees WHERE id = $1", claim.employee_id
+        )
+        if emp_row and emp_row.get("manager_id"):
+            print(f"ℹ️ Employee {claim.employee_id} has direct manager — skipping approval workflow")
+            return {"policy_id": None, "tasks_created": 0}
+
+        policy = await ApprovalPolicy.resolve_for_employee(claim.employee_id)
+        if not policy:
+            # Legacy fallback: no policy configured, rely on manager_id path.
+            return {"policy_id": None, "tasks_created": 0}
+
+        steps = await ApprovalPolicy.get_steps(policy["id"])
+        if not steps:
+            raise ValueError("Default approval policy has no steps")
+
+        await db.query(
+            """
+            UPDATE claims
+            SET approval_policy_id = $1, current_step_order = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+            """,
+            policy["id"],
+            claim_id,
+        )
+
+        tasks_created = 0
+        for step in steps:
+            assignee_id = await ApprovalPolicy.resolve_step_assignee(
+                step=step,
+                claimant_id=claim.employee_id,
+            )
+            status = "PENDING" if step["step_order"] == 1 else "WAITING"
+            await db.query(
+                """
+                INSERT INTO claim_approval_tasks (
+                    claim_id, policy_step_id, step_order, assignee_employee_id, status
+                ) VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (claim_id, step_order) DO NOTHING
+                """,
+                claim_id,
+                step["id"],
+                step["step_order"],
+                assignee_id,
+                status,
+            )
+            tasks_created += 1
+
+        return {"policy_id": policy["id"], "tasks_created": tasks_created}
+
+    @classmethod
+    async def approve_step(
+        cls,
+        claim_id: int,
+        approver_id: int,
+        final_amount: Optional[float] = None,
+        comments: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Approve current step and move to next step or finalize claim."""
+        claim = await cls.find_by_id(claim_id)
+        if not claim:
+            raise ValueError("Claim not found")
+
+        current_task = await cls.get_current_pending_task(claim_id)
+        if current_task:
+            print(f"🔍 DEBUG approve_step: approver_id={approver_id}, "
+                  f"task_assignee_id={current_task.get('assignee_employee_id')}, "
+                  f"task_id={current_task.get('id')}, step={current_task.get('step_order')}")
+            if current_task.get("assignee_employee_id") != approver_id:
+                raise PermissionError("You are not assigned to this approval step")
+
+            await db.query(
+                """
+                UPDATE claim_approval_tasks
+                SET status = 'APPROVED',
+                    acted_at = CURRENT_TIMESTAMP,
+                    acted_by = $1,
+                    comments = COALESCE($2, comments),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $3
+                """,
+                approver_id,
+                comments,
+                current_task["id"],
+            )
+
+            next_task = await db.query_one(
+                """
+                SELECT * FROM claim_approval_tasks
+                WHERE claim_id = $1 AND step_order > $2
+                ORDER BY step_order ASC
+                LIMIT 1
+                """,
+                claim_id,
+                current_task["step_order"],
+            )
+
+            if next_task:
+                await db.query(
+                    """
+                    UPDATE claim_approval_tasks
+                    SET status = 'PENDING', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $1
+                    """,
+                    next_task["id"],
+                )
+                await db.query(
+                    """
+                    UPDATE claims
+                    SET current_step_order = $1, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $2
+                    """,
+                    next_task["step_order"],
+                    claim_id,
+                )
+                return {
+                    "claim": await cls.find_by_id(claim_id),
+                    "is_final": False,
+                    "next_assignee_id": next_task.get("assignee_employee_id"),
+                    "approved_step": current_task["step_order"],
+                }
+        elif claim.manager_id and claim.manager_id != approver_id:
+            raise PermissionError("You are not authorized to approve this claim")
+
+        # Final approval path (task-based completion or legacy single-step flow)
+        status_result = await db.query("SELECT id FROM claim_statuses WHERE code = 'APPROVED'")
+        status_id = status_result[0]["id"]
+        await db.query(
+            """
+            UPDATE claims
+            SET status_id = $1, approved_by = $2, approved_at = CURRENT_TIMESTAMP,
+                final_amount = COALESCE($3, system_amount), updated_at = CURRENT_TIMESTAMP
+            WHERE id = $4
+            """,
+            status_id,
+            approver_id,
+            final_amount,
+            claim_id,
+        )
+        return {
+            "claim": await cls.find_by_id(claim_id),
+            "is_final": True,
+            "next_assignee_id": None,
+            "approved_step": current_task["step_order"] if current_task else 1,
+        }
+
+    @classmethod
+    async def reject_step(cls, claim_id: int, approver_id: int, reason: str) -> Dict[str, Any]:
+        """Reject current step and close claim."""
+        claim = await cls.find_by_id(claim_id)
+        if not claim:
+            raise ValueError("Claim not found")
+
+        current_task = await cls.get_current_pending_task(claim_id)
+        if current_task and current_task.get("assignee_employee_id") != approver_id:
+            raise PermissionError("You are not assigned to this approval step")
+        if not current_task and claim.manager_id and claim.manager_id != approver_id:
+            raise PermissionError("You are not authorized to reject this claim")
+
+        if current_task:
+            await db.query(
+                """
+                UPDATE claim_approval_tasks
+                SET status = 'REJECTED',
+                    acted_at = CURRENT_TIMESTAMP,
+                    acted_by = $1,
+                    comments = $2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $3
+                """,
+                approver_id,
+                reason,
+                current_task["id"],
+            )
+            await db.query(
+                """
+                UPDATE claim_approval_tasks
+                SET status = 'SKIPPED', updated_at = CURRENT_TIMESTAMP
+                WHERE claim_id = $1 AND status IN ('WAITING', 'PENDING') AND id <> $2
+                """,
+                claim_id,
+                current_task["id"],
+            )
+
+        status_result = await db.query("SELECT id FROM claim_statuses WHERE code = 'REJECTED'")
+        status_id = status_result[0]["id"]
+        await db.query(
+            """
+            UPDATE claims
+            SET status_id = $1, approved_by = $2, approved_at = CURRENT_TIMESTAMP,
+                rejection_reason = $3, final_amount = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $4
+            """,
+            status_id,
+            approver_id,
+            reason,
+            claim_id,
+        )
+        return {
+            "claim": await cls.find_by_id(claim_id),
+            "rejected_step": current_task["step_order"] if current_task else 1,
+        }
     
     @classmethod
     async def approve(cls, claim_id: int, approver_id: int, final_amount: Optional[float] = None) -> 'Claim':
@@ -340,9 +574,29 @@ class Claim(BaseModel):
         # Update claim
         result = await db.query("""
             UPDATE claims SET status_id = $1, appeal_count = COALESCE(appeal_count, 0) + 1,
-                              rejection_reason = NULL, updated_at = CURRENT_TIMESTAMP
+                              rejection_reason = NULL, current_step_order = 1, updated_at = CURRENT_TIMESTAMP
             WHERE id = $2 RETURNING *
         """, status_id, claim_id)
+
+        # Re-open workflow tasks for appeal cycle.
+        await db.query(
+            """
+            UPDATE claim_approval_tasks
+            SET status = CASE WHEN step_order = 1 THEN 'PENDING' ELSE 'WAITING' END,
+                acted_at = NULL,
+                acted_by = NULL,
+                comments = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE claim_id = $1
+            """,
+            claim_id,
+        )
+        reopened_task = await db.query_one(
+            "SELECT 1 FROM claim_approval_tasks WHERE claim_id = $1 LIMIT 1",
+            claim_id,
+        )
+        if not reopened_task:
+            await cls.initialize_approval_workflow(claim_id)
         
         return cls(result[0]) if result else None
     
@@ -699,6 +953,8 @@ class Claim(BaseModel):
             'status_name': self.status_name,
             'manager_id': self.manager_id,
             'manager_name': self.manager_name,
+            'approval_policy_id': self.approval_policy_id,
+            'current_step_order': self.current_step_order,
             'approved_by': self.approved_by,
             'approver_name': self.approver_name,
             'claim_type': self.claim_type,
@@ -734,6 +990,18 @@ async def find_by_employee(employee_id: int = None, status: str = None, limit: i
 async def find_pending_for_manager(manager_id: int, organization_id: int = None):
     claims = await Claim.find_pending_for_manager(manager_id, organization_id)
     return [c.to_dict() for c in claims]
+
+async def initialize_approval_workflow(claim_id: int):
+    return await Claim.initialize_approval_workflow(claim_id)
+
+async def get_current_pending_task(claim_id: int):
+    return await Claim.get_current_pending_task(claim_id)
+
+async def approve_step(claim_id: int, approver_id: int, final_amount: float = None, comments: str = None):
+    return await Claim.approve_step(claim_id, approver_id, final_amount, comments)
+
+async def reject_step(claim_id: int, approver_id: int, reason: str):
+    return await Claim.reject_step(claim_id, approver_id, reason)
 
 async def approve(claim_id: int, approver_id: int, final_amount: float = None):
     claim = await Claim.approve(claim_id, approver_id, final_amount)

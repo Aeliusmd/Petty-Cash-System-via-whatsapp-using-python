@@ -29,6 +29,7 @@ class Employee(BaseModel):
     unit_id: int = None
     location_id: int = None
     manager_id: int = None
+    approval_policy_id: int = None
     whatsapp_chat_id: str = None
     is_active: bool = True
     is_admin: bool = False
@@ -296,15 +297,16 @@ class Employee(BaseModel):
         result = await db.query("""
             INSERT INTO employees (employee_code, name, phone_number, email,
                                    grade_id, unit_id, location_id, manager_id, role, role_id,
-                                   organization_id, is_admin, is_manager,
+                                   organization_id, approval_policy_id, is_admin, is_manager,
                                    spending_limit, spending_limit_period, spending_limit_custom_days)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::VARCHAR, 
                     (SELECT id FROM roles WHERE code = $9::VARCHAR LIMIT 1), -- Auto-map role string to ID
-                    $10, $11, $12, $13, $14, $15) RETURNING *
+                    $10, $11, $12, $13, $14, $15, $16) RETURNING *
         """, employee_code, data.get('name'), data.get('phone_number'),
             data.get('email'), data.get('grade_id'), data.get('unit_id'),
             data.get('location_id'), data.get('manager_id'), data.get('role', 'staff'),
-            data.get('organization_id'), data.get('is_admin', False), data.get('is_manager', False),
+            data.get('organization_id'), data.get('approval_policy_id'),
+            data.get('is_admin', False), data.get('is_manager', False),
             data.get('spending_limit'), data.get('spending_limit_period', 'monthly'),
             data.get('spending_limit_custom_days'))
         
@@ -319,6 +321,7 @@ class Employee(BaseModel):
         valid_fields = {
             'employee_code', 'name', 'phone_number', 'email',
             'grade_id', 'unit_id', 'location_id', 'manager_id',
+            'approval_policy_id',
             'role', 'role_id', 'is_active', 'is_admin', 'is_manager',
             'spending_limit', 'spending_limit_period', 'spending_limit_custom_days'
         }
@@ -396,6 +399,7 @@ class Employee(BaseModel):
             'location_code': self.location_code,
             'location_name': self.location_name,
             'manager_id': self.manager_id,
+            'approval_policy_id': self.approval_policy_id,
             'manager_name': self.manager_name,
             'manager_phone': self.manager_phone,
             'organization_id': self.organization_id,  # Was missing!

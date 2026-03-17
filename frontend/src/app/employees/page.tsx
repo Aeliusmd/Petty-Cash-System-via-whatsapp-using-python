@@ -23,6 +23,7 @@ interface Employee {
   unit_code: string | null;
   unit_name: string | null;
   manager_id: number | null;
+  approval_policy_id: number | null;
   manager_name: string | null;
   spending_limit: number | null;
   spending_limit_period: string | null;
@@ -33,6 +34,7 @@ interface Grade    { id: number; code: string; name: string; }
 interface Location { id: number; code: string; name: string; }
 interface Unit     { id: number; code: string; name: string; }
 interface Role     { id: number; code: string; name: string; }
+interface ApprovalPolicyOption { id: number; name: string; unit_id: number; }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
@@ -62,6 +64,7 @@ export default function EmployeesPage() {
   const [searchTerm, setSearchTerm]     = useState('');
   const [roleFilter, setRoleFilter]     = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [approvalPolicyOptions, setApprovalPolicyOptions] = useState<ApprovalPolicyOption[]>([]);
 
   // Pagination
   const [currentPage, setCurrentPage]   = useState(1);
@@ -77,6 +80,7 @@ export default function EmployeesPage() {
     location_id: '',
     unit_id: '',
     manager_id: '',
+    approval_policy_id: '',
     role: 'employee',
     spending_limit: '',
     spending_limit_period: 'monthly',
@@ -100,7 +104,7 @@ export default function EmployeesPage() {
       setLoading(true);
       let url = `${API_BASE_URL}/api/employees?include_inactive=${includeInactive}`;
       if (roleFilter) url += `&role=${roleFilter}`;
-      const res = await authenticatedFetch(url);
+      const res = await authenticatedFetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to fetch employees');
       const data = await res.json();
       setEmployees(data.employees || []);
@@ -114,10 +118,10 @@ export default function EmployeesPage() {
   async function fetchDropdowns() {
     try {
       const [gr, lo, un, ro] = await Promise.all([
-        authenticatedFetch(`${API_BASE_URL}/api/grades`),
-        authenticatedFetch(`${API_BASE_URL}/api/locations`),
-        authenticatedFetch(`${API_BASE_URL}/api/units`),
-        authenticatedFetch(`${API_BASE_URL}/api/roles`),
+        authenticatedFetch(`${API_BASE_URL}/api/grades`, { cache: 'no-store' }),
+        authenticatedFetch(`${API_BASE_URL}/api/locations`, { cache: 'no-store' }),
+        authenticatedFetch(`${API_BASE_URL}/api/units`, { cache: 'no-store' }),
+        authenticatedFetch(`${API_BASE_URL}/api/roles`, { cache: 'no-store' }),
       ]);
       if (gr.ok) { const d = await gr.json(); setGrades(d.grades || []); }
       if (lo.ok) { const d = await lo.json(); setLocations(d.locations || []); }
@@ -128,7 +132,8 @@ export default function EmployeesPage() {
 
   function openAddModal() {
     setEditingEmployee(null);
-    setFormData({ employee_code: '', name: '', phone_number: '', email: '', grade_id: '', location_id: '', unit_id: '', manager_id: '', role: 'employee', spending_limit: '', spending_limit_period: 'monthly', spending_limit_custom_days: '' });
+    setFormData({ employee_code: '', name: '', phone_number: '', email: '', grade_id: '', location_id: '', unit_id: '', manager_id: '', approval_policy_id: '', role: 'employee', spending_limit: '', spending_limit_period: 'monthly', spending_limit_custom_days: '' });
+    setApprovalPolicyOptions([]);
     setShowModal(true);
   }
 
@@ -143,12 +148,34 @@ export default function EmployeesPage() {
       location_id: emp.location_id?.toString() || '',
       unit_id: emp.unit_id?.toString() || '',
       manager_id: emp.manager_id?.toString() || '',
+      approval_policy_id: emp.approval_policy_id?.toString() || '',
       role: emp.role,
       spending_limit: emp.spending_limit?.toString() || '',
       spending_limit_period: emp.spending_limit_period || 'monthly',
       spending_limit_custom_days: emp.spending_limit_custom_days?.toString() || '',
     });
+    if (emp.unit_id) {
+      fetchApprovalPolicies(emp.unit_id);
+    } else {
+      setApprovalPolicyOptions([]);
+    }
     setShowModal(true);
+  }
+
+  async function fetchApprovalPolicies(unitId: number) {
+    try {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/approval-policies?unit_id=${unitId}`);
+      if (!res.ok) {
+        setApprovalPolicyOptions([]);
+        return;
+      }
+      const data = await res.json();
+      const policies = (data.policies || []).map((p: any) => ({ id: p.id, name: p.name, unit_id: p.unit_id }));
+      setApprovalPolicyOptions(policies);
+    } catch (error) {
+      console.error('Failed to fetch approval policies', error);
+      setApprovalPolicyOptions([]);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -161,6 +188,7 @@ export default function EmployeesPage() {
         location_id: formData.location_id ? parseInt(formData.location_id) : null,
         unit_id:     formData.unit_id     ? parseInt(formData.unit_id)     : null,
         manager_id:  formData.manager_id  ? parseInt(formData.manager_id)  : null,
+        approval_policy_id: formData.approval_policy_id ? parseInt(formData.approval_policy_id) : null,
         spending_limit: formData.spending_limit ? parseFloat(formData.spending_limit) : null,
         spending_limit_period: formData.spending_limit_period,
         spending_limit_custom_days: formData.spending_limit_custom_days ? parseInt(formData.spending_limit_custom_days) : null,
@@ -538,7 +566,15 @@ export default function EmployeesPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-                    <select value={formData.unit_id} onChange={e => setFormData({...formData, unit_id: e.target.value})} className={inputCls}>
+                    <select value={formData.unit_id} onChange={e => {
+                      const unit_id = e.target.value;
+                      setFormData({...formData, unit_id, approval_policy_id: ''});
+                      if (unit_id) {
+                        fetchApprovalPolicies(parseInt(unit_id));
+                      } else {
+                        setApprovalPolicyOptions([]);
+                      }
+                    }} className={inputCls}>
                       <option value="">Select Unit</option>
                       {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
@@ -552,6 +588,16 @@ export default function EmployeesPage() {
                     <option value="">No Manager</option>
                     {managers.filter(m => m.id !== editingEmployee?.id).map(m => (
                       <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Approval Policy</label>
+                  <select value={formData.approval_policy_id} onChange={e => setFormData({...formData, approval_policy_id: e.target.value})} className={inputCls}>
+                    <option value="">Use department default</option>
+                    {approvalPolicyOptions.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
                 </div>

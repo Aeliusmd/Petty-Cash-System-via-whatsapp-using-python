@@ -301,15 +301,12 @@ async def generate_reply(message_text: str, chat_id: str, media_info: dict = Non
 How many days?"""
 
     # ===== HANDLE MANAGER APPROVE/REJECT COMMANDS =====
-    # Check if employee is a manager and handle approve/reject commands
-    is_manager = employee.get('is_manager', False) or employee.get('is_admin', False)
-    
     # Clean text: remove emojis and extra whitespace for command matching
     clean_text = re.sub(r'[^\w\s#-]', '', text).strip()
     
     # Approve command: flexible matching - "approve 123", "✅ Approve 12", "Approve #12", etc.
     approve_match = re.search(r'\bapprove\s*#?(\d+)\b', clean_text, re.IGNORECASE)
-    if approve_match and is_manager:
+    if approve_match:
         claim_id = int(approve_match.group(1))
         try:
             # Find the claim
@@ -317,40 +314,54 @@ How many days?"""
             if not claim:
                 return f"❌ Claim #{claim_id} not found."
             
-            # Verify this manager is authorized to approve this claim
-            if claim.get('manager_id') != employee['id']:
-                return f"❌ You are not authorized to approve this claim."
-            
             # Check status
             current_status = claim.get('status_code')
             if current_status not in ('PENDING', 'APPEALED'):
                 return f"❌ Claim #{claim_id} is already {claim.get('status_name')}."
-            
-            # Record status change
-            await claim_model.record_status_change(
-                claim_id, current_status, 'APPROVED', employee['id'], 'Approved via WhatsApp'
-            )
-            
-            # Approve the claim
-            await claim_model.approve(claim_id, employee['id'])
-            
-            # Notify the employee
-            await notification_service.notify_staff_of_approval(claim)
-            
-            return f"""✅ *Claim Approved!*
+
+            workflow_result = await claim_model.approve_step(claim_id, employee['id'])
+            updated_claim = workflow_result.get("claim") or claim
+
+            if workflow_result.get("is_final"):
+                await claim_model.record_status_change(
+                    claim_id, current_status, 'APPROVED', employee['id'], 'Approved via WhatsApp'
+                )
+                await notification_service.notify_staff_of_approval(updated_claim)
+                return f"""✅ *Claim Approved!*
 
 📋 Claim #: *{claim['claim_number']}*
 👤 Staff: {claim.get('employee_name', 'N/A')}
 💵 Amount: {format_currency(claim.get('user_amount') or claim.get('system_amount') or 0)}
 
 The employee has been notified."""
+            
+            await claim_model.record_status_change(
+                claim_id, current_status, current_status, employee['id'], 'Step approved via WhatsApp'
+            )
+            # Notify the claimant about the step approval
+            approved_step = workflow_result.get("approved_step", 1)
+            next_assignee_id = workflow_result.get("next_assignee_id")
+            await notification_service.notify_staff_of_step_approval(
+                updated_claim, 
+                employee.get('name', 'Approver'), 
+                approved_step,
+                next_assignee_id
+            )
+            # Notify the next approver
+            await notification_service.notify_next_approver_of_claim(updated_claim)
+            return f"""✅ *Step Approved*
+
+📋 Claim #: *{claim['claim_number']}*
+➡️ Routed to next approver."""
+        except PermissionError as e:
+            return f"❌ {str(e)}"
         except Exception as e:
             print(f"❌ Error approving claim via WhatsApp: {e}")
             return f"❌ Error approving claim. Please try again."
     
     # Reject command: flexible matching - "reject 123 reason", "❌ Reject #12 Invalid", etc.
     reject_match = re.search(r'\breject\s*#?(\d+)(?:\s+(.+))?', clean_text, re.IGNORECASE)
-    if reject_match and is_manager:
+    if reject_match:
         claim_id = int(reject_match.group(1))
         reason = reject_match.group(2).strip() if reject_match.group(2) else None
         
@@ -366,25 +377,23 @@ Example: *Reject {claim_id} Invalid receipt* or *Reject {claim_id} Missing detai
             if not claim:
                 return f"❌ Claim #{claim_id} not found."
             
-            # Verify this manager is authorized
-            if claim.get('manager_id') != employee['id']:
-                return f"❌ You are not authorized to reject this claim."
-            
             # Check status
             current_status = claim.get('status_code')
             if current_status not in ('PENDING', 'APPEALED'):
                 return f"❌ Claim #{claim_id} is already {claim.get('status_name')}."
-            
-            # Record status change
+            result = await claim_model.reject_step(claim_id, employee['id'], reason)
+            updated_claim = result.get("claim") or claim
             await claim_model.record_status_change(
                 claim_id, current_status, 'REJECTED', employee['id'], reason
             )
             
-            # Reject the claim
-            await claim_model.reject(claim_id, employee['id'], reason)
-            
-            # Notify the employee
-            await notification_service.notify_staff_of_rejection(claim, reason)
+            is_final = result.get("is_final")
+            if is_final:
+                await notification_service.notify_staff_of_rejection(updated_claim, reason)
+            else:
+                rejected_step = result.get("approved_step", 1) # reusing identical logic
+                await notification_service.notify_staff_of_step_rejection(updated_claim, employee.get('name', 'Approver'), rejected_step, reason)
+                
             
             return f"""❌ *Claim Rejected*
 
@@ -393,6 +402,8 @@ Example: *Reject {claim_id} Invalid receipt* or *Reject {claim_id} Missing detai
 📝 Reason: {reason}
 
 The employee has been notified and can appeal."""
+        except PermissionError as e:
+            return f"❌ {str(e)}"
         except Exception as e:
             print(f"❌ Error rejecting claim via WhatsApp: {e}")
             return f"❌ Error rejecting claim. Please try again."
@@ -868,6 +879,8 @@ Type *skip* to proceed without quotations."""
                     'description': context.get('details'),
                     'manager_id': employee.get('manager_id')
                 })
+                # Initialize multi-step approval workflow for WhatsApp-created claims.
+                await claim_model.initialize_approval_workflow(claim['id'])
                 
                 # Save quotations (as receipts)
                 receipts = context.get('receipts', [])
@@ -906,11 +919,21 @@ Type *skip* to proceed without quotations."""
                 if receipts:
                     await claim_model.calculate_system_amount(claim['id'])
 
-                # Notifications
+                # Notifications: direct manager first, approval policy fallback.
                 from app.services import notification_service
+                duplicate_warnings = [item['warning'] for item in media_info_list if item.get('warning')]
                 if employee.get('manager_id'):
-                    duplicate_warnings = [item['warning'] for item in media_info_list if item.get('warning')]
-                    await notification_service.notify_manager_of_new_claim(claim, media_info_list, duplicate_warnings=duplicate_warnings)
+                    await notification_service.notify_manager_of_new_claim(
+                        claim,
+                        media_info_list,
+                        duplicate_warnings=duplicate_warnings,
+                    )
+                else:
+                    routed = await notification_service.notify_next_approver_of_claim(
+                        claim, duplicate_warnings=duplicate_warnings
+                    )
+                    if not routed:
+                        print(f"⚠️ No manager or approval policy approver for {employee['name']}")
                 
                 await conversation_model.reset(chat_id)
                 
@@ -1461,6 +1484,8 @@ Or type:
                     'description': context.get('details') or f'{category_code} claim',
                     'manager_id': employee.get('manager_id')
                 })
+                # Initialize multi-step approval workflow for WhatsApp-created claims.
+                await claim_model.initialize_approval_workflow(claim['id'])
 
 
                 # Save ALL receipts to database (supports multi-receipt)
@@ -1558,22 +1583,35 @@ Or type:
                     await claim_model.calculate_system_amount(claim['id'])
                 
                 
-                # Notify manager with claim details and receipt
+                # Notifications: direct manager first, approval policy fallback.
                 print(f"🔍 DEBUG: employee.manager_id={employee.get('manager_id')}, manager_name={employee.get('manager_name')}")
+                duplicate_warnings = [item['warning'] for item in media_info_list if item.get('warning')]
                 if employee.get('manager_id'):
-                    print(f"📤 Sending notification to manager ID: {employee.get('manager_id')}")
-                    # Extract duplicate warnings from media_info_list
-                    duplicate_warnings = [item['warning'] for item in media_info_list if item.get('warning')]
-                    await notification_service.notify_manager_of_new_claim(claim, media_info_list, duplicate_warnings=duplicate_warnings)
+                    print(f"📤 Sending to direct manager ID: {employee.get('manager_id')}")
+                    await notification_service.notify_manager_of_new_claim(
+                        claim,
+                        media_info_list,
+                        duplicate_warnings=duplicate_warnings,
+                    )
                 else:
-                    print(f"⚠️ No manager assigned to employee {employee['name']} - skipping manager notification")
+                    routed = await notification_service.notify_next_approver_of_claim(
+                        claim, duplicate_warnings=duplicate_warnings
+                    )
+                    if not routed:
+                        print(f"⚠️ No manager or approval policy approver for {employee['name']}")
 
                 # Reset conversation
                 await conversation_model.reset(chat_id)
 
-                # Manager notice
+                # Route notice (who received the approval request).
                 manager_notice = ''
-                if employee.get('manager_name'):
+                pending_task = await claim_model.get_current_pending_task(claim['id'])
+                if pending_task and pending_task.get('assignee_employee_id'):
+                    assignee = await employee_model.find_by_id(pending_task['assignee_employee_id'])
+                    assignee_name = assignee.get('name') if assignee else None
+                    if assignee_name:
+                        manager_notice = f"\n\n📤 Sent to *{assignee_name}* for step {pending_task.get('step_order', 1)} approval."
+                elif employee.get('manager_name'):
                     manager_notice = f"\n\n📤 Sent to *{employee['manager_name']}* for approval."
 
                 final_amount = claim.get('system_amount') or claim.get('user_amount') or 0

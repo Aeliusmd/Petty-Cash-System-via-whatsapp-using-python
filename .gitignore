@@ -53,9 +53,11 @@ media/
 *.log
 
 # ========================
-# Uploaded Receipts
+# Uploaded Receipts & Media
 # ========================
 backend/receipts/
+uploads/
+receipts/
 
 # ========================
 # OS Files

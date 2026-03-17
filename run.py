@@ -8,6 +8,12 @@ import os
 import sys
 from pathlib import Path
 
+# Force UTF-8 on Windows console so emojis in print() don't crash with cp1252
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Add backend to Python path
 root_dir = Path(__file__).parent
 backend_dir = root_dir / 'backend'
@@ -21,10 +27,10 @@ env_default = root_dir / '.env'
 
 if env_local.exists():
     load_dotenv(env_local)
-    print(f"📄 Loaded environment from: .env.local (LOCAL DEVELOPMENT MODE)")
+    print("📄 Loaded environment from: .env.local (LOCAL DEVELOPMENT MODE)")
 else:
     load_dotenv(env_default)
-    print(f"📄 Loaded environment from: .env")
+    print("📄 Loaded environment from: .env")
 
 if __name__ == "__main__":
     import uvicorn

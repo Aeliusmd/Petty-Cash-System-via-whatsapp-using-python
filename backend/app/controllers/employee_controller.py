@@ -43,17 +43,23 @@ class EmployeeController(BaseController):
         role: Optional[str] = None,
         location_id: Optional[int] = None,
         unit_id: Optional[int] = None,
+        organization_id: Optional[int] = None,
         include_inactive: bool = False,
         auth: dict = Depends(require_permission("employees.read.all"))
     ):
         """Get all employees with optional filters"""
         service = EmployeeService(request)
         
+        # Super admins can specify an org via query param; regular users always use their auth-bound org
+        effective_org_id = auth.get('organization_id')
+        if auth.get('role') == 'super_admin' and organization_id:
+            effective_org_id = organization_id
+        
         employees = await service.get_all_employees(
             role=role,
             location_id=location_id,
             unit_id=unit_id,
-            organization_id=auth.get('organization_id'),
+            organization_id=effective_org_id,
             include_inactive=include_inactive
         )
         

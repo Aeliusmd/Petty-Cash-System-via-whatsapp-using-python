@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS employees (
     unit_id INT REFERENCES units(id),
     location_id INT REFERENCES locations(id),
     manager_id INT REFERENCES employees(id),
+    approval_policy_id INT,
     role VARCHAR(20) DEFAULT 'staff' CHECK (role IN ('staff', 'manager', 'admin', 'finance')),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -134,6 +135,59 @@ CREATE TABLE IF NOT EXISTS category_caps (
 -- CLAIMS & APPROVALS
 -- =============================================
 
+-- Approval Policies (single default policy per department/unit)
+CREATE TABLE IF NOT EXISTS approval_policies (
+    id SERIAL PRIMARY KEY,
+    organization_id INT REFERENCES organizations(id) ON DELETE CASCADE,
+    unit_id INT NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    name VARCHAR(120) NOT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_approval_policies_default_per_unit
+ON approval_policies(unit_id)
+WHERE is_default = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_approval_policies_org ON approval_policies(organization_id);
+CREATE INDEX IF NOT EXISTS idx_approval_policies_unit ON approval_policies(unit_id);
+
+-- Approval Policy Steps (ordered, role based with optional user override)
+CREATE TABLE IF NOT EXISTS approval_policy_steps (
+    id SERIAL PRIMARY KEY,
+    policy_id INT NOT NULL REFERENCES approval_policies(id) ON DELETE CASCADE,
+    step_order INT NOT NULL,
+    role_type VARCHAR(50) NOT NULL,
+    assignee_employee_id INT REFERENCES employees(id),
+    is_required BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(policy_id, step_order)
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_steps_policy ON approval_policy_steps(policy_id);
+
+-- Runtime approval tasks per claim
+CREATE TABLE IF NOT EXISTS claim_approval_tasks (
+    id SERIAL PRIMARY KEY,
+    claim_id INT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+    policy_step_id INT NOT NULL REFERENCES approval_policy_steps(id) ON DELETE CASCADE,
+    step_order INT NOT NULL,
+    assignee_employee_id INT REFERENCES employees(id),
+    status VARCHAR(20) NOT NULL DEFAULT 'WAITING' CHECK (status IN ('WAITING', 'PENDING', 'APPROVED', 'REJECTED', 'SKIPPED')),
+    acted_at TIMESTAMP,
+    acted_by INT REFERENCES employees(id),
+    comments TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(claim_id, step_order)
+);
+
+CREATE INDEX IF NOT EXISTS idx_claim_approval_tasks_claim ON claim_approval_tasks(claim_id);
+CREATE INDEX IF NOT EXISTS idx_claim_approval_tasks_assignee_status ON claim_approval_tasks(assignee_employee_id, status);
+
 -- Claims Table
 CREATE TABLE IF NOT EXISTS claims (
     id SERIAL PRIMARY KEY,
@@ -150,6 +204,8 @@ CREATE TABLE IF NOT EXISTS claims (
     final_amount DECIMAL(10,2),
     description TEXT,
     manager_id INT REFERENCES employees(id),
+    approval_policy_id INT REFERENCES approval_policies(id),
+    current_step_order INT,
     approved_by INT REFERENCES employees(id),
     approved_at TIMESTAMP,
     rejection_reason TEXT,
@@ -337,8 +393,19 @@ DO $$
 DECLARE
     t TEXT;
 BEGIN
+    -- Add cross-table FKs safely for pre-existing DBs.
+    -- These are not in-line so CREATE TABLE order remains valid.
+    BEGIN
+        ALTER TABLE employees
+        ADD CONSTRAINT fk_employees_approval_policy
+        FOREIGN KEY (approval_policy_id) REFERENCES approval_policies(id);
+    EXCEPTION WHEN duplicate_object THEN
+        NULL;
+    END;
+
     FOR t IN SELECT unnest(ARRAY['grades', 'organizations', 'units', 'locations', 'claim_categories', 
                                   'employees', 'batta_rates', 'category_caps', 
+                                  'approval_policies', 'approval_policy_steps', 'claim_approval_tasks',
                                   'claims', 'conversation_states'])
     LOOP
         EXECUTE format('

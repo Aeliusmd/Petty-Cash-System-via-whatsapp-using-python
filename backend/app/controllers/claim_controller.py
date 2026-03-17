@@ -10,7 +10,12 @@ import io
 from datetime import date
 from app.controllers.base import BaseController
 from app.services.claim_service import ClaimService
-from app.services.notification_service import notify_manager_of_new_claim, notify_staff_of_approval, notify_staff_of_rejection
+from app.services.notification_service import (
+    notify_manager_of_new_claim,
+    notify_staff_of_approval,
+    notify_staff_of_rejection,
+    notify_next_approver_of_claim,
+)
 from app.schemas.claim import (
     ClaimCreate, ClaimUpdate, ClaimApproveRequest, ClaimRejectRequest, 
     ClaimAppealRequest, ClaimResponse, ClaimListResponse
@@ -19,6 +24,7 @@ from app.utils.auth import require_authenticated, require_permission
 from pathlib import Path
 import asyncio
 import uuid
+from app.models import claim as claim_model
 
 
 class ClaimController(BaseController):
@@ -221,11 +227,13 @@ class ClaimController(BaseController):
         # Check per-user access
         permissions = auth.get('permissions', [])
         is_own = claim.employee_id == auth['employee_id']
+        pending_task = await claim_model.get_current_pending_task(claim_id)
         is_manager = claim.manager_id == auth['employee_id']
+        is_current_assignee = pending_task and pending_task.get('assignee_employee_id') == auth['employee_id']
         
         if is_own:
             pass # OK
-        elif is_manager and ('claims.read.team' in permissions or 'claims.approve' in permissions):
+        elif (is_manager or is_current_assignee) and ('claims.read.team' in permissions or 'claims.approve' in permissions):
             pass # OK
         elif 'claims.read.all' in permissions:
             pass # OK
@@ -332,14 +340,16 @@ class ClaimController(BaseController):
         else:
             warnings = []
         
-        # Notify manager
+        # Notify first approver (falls back to manager in legacy mode)
         try:
             claim_dict = claim.to_dict()
             claim_dict['employee_name'] = employee.name
             claim_dict['employee_code'] = employee.employee_code
-            await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
+            notified = await notify_next_approver_of_claim(claim_dict)
+            if not notified:
+                await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
         except Exception as e:
-            print(f"⚠️ Failed to notify manager: {e}")
+            print(f"⚠️ Failed to notify approver: {e}")
         
         return self.success_response(data=claim.to_dict(), message="Claim created successfully")
     
@@ -433,14 +443,16 @@ class ClaimController(BaseController):
             print(f"✅ Saved {len(quotation_data)} quotations for advance claim {claim.id}")
             warnings = result.get('warnings', [])
         
-        # Notify manager
+        # Notify first approver (falls back to manager in legacy mode)
         try:
             claim_dict = claim.to_dict()
             claim_dict['employee_name'] = employee.name
             claim_dict['employee_code'] = employee.employee_code
-            await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
+            notified = await notify_next_approver_of_claim(claim_dict)
+            if not notified:
+                await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
         except Exception as e:
-            print(f"⚠️ Failed to notify manager: {e}")
+            print(f"⚠️ Failed to notify approver: {e}")
         
         return self.success_response(data=claim.to_dict(), message="Advance claim created successfully")
 
@@ -455,21 +467,31 @@ class ClaimController(BaseController):
         """Approve a claim"""
         service = ClaimService(request)
         
-        claim = await service.approve_claim(
-            claim_id=claim_id,
-            approver_id=auth['employee_id'],
-            final_amount=data.final_amount,
-            organization_id=auth.get('organization_id')
-        )
-        
+        try:
+            claim = await service.approve_claim(
+                claim_id=claim_id,
+                approver_id=auth['employee_id'],
+                final_amount=data.final_amount,
+                organization_id=auth.get('organization_id')
+            )
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+ 
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
-        
-        # Notify staff
-        try:
-            await notify_staff_of_approval(claim.to_dict())
-        except Exception as e:
-            print(f"⚠️ Failed to notify staff: {e}")
+
+        if claim.status_code == 'APPROVED':
+            try:
+                await notify_staff_of_approval(claim.to_dict())
+            except Exception as e:
+                print(f"⚠️ Failed to notify staff: {e}")
+        else:
+            try:
+                await notify_next_approver_of_claim(claim.to_dict())
+            except Exception as e:
+                print(f"⚠️ Failed to notify next approver: {e}")
         
         # Get spending summary after approval
         from app.models.claim import Claim as ClaimModel
@@ -490,17 +512,21 @@ class ClaimController(BaseController):
         """Reject a claim"""
         service = ClaimService(request)
         
-        claim = await service.reject_claim(
-            claim_id=claim_id,
-            approver_id=auth['employee_id'],
-            reason=data.reason,
-            organization_id=auth.get('organization_id')
-        )
+        try:
+            claim = await service.reject_claim(
+                claim_id=claim_id,
+                approver_id=auth['employee_id'],
+                reason=data.reason,
+                organization_id=auth.get('organization_id')
+            )
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
         
-        # Notify staff
         try:
             await notify_staff_of_rejection(claim.to_dict(), data.reason)
         except Exception as e:

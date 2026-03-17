@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from app.models.unit import Unit
 from app.models.rates import Grade, Location
 from app.models.category import Category
+from app.models.approval import ApprovalPolicy
+from app.db import db
 from app.schemas.category import CategoryCreate, CategoryUpdate
 from app.utils.auth import require_authenticated, require_permission
 
@@ -22,6 +24,19 @@ class UnitUpdate(BaseModel):
     code: Optional[str] = None
     name: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class ApprovalStepInput(BaseModel):
+    step_order: int
+    role_type: str
+    assignee_employee_id: Optional[int] = None
+    is_required: bool = True
+
+
+class ApprovalPolicyUpsert(BaseModel):
+    unit_id: int
+    name: str
+    steps: List[ApprovalStepInput]
 
 # Main router that aggregates sub-routers
 router = APIRouter()
@@ -151,9 +166,57 @@ async def get_locations(auth: dict = Depends(require_authenticated)):
 # Categories router implementation removed as it is handled by CategoryController
 
 # ---------------------------------------------------------
+# Approval Policy Routes
+# ---------------------------------------------------------
+approval_policies_router = APIRouter(prefix="/api/approval-policies", tags=["Configuration"])
+
+
+@approval_policies_router.get("")
+async def get_approval_policies(
+    unit_id: int,
+    auth: dict = Depends(require_authenticated),
+):
+    if auth.get("organization_id"):
+        unit = await db.query_one("SELECT organization_id FROM units WHERE id = $1", unit_id)
+        if not unit or unit.get("organization_id") != auth.get("organization_id"):
+            raise HTTPException(status_code=404, detail="Department not found")
+    policies = await ApprovalPolicy.list_by_unit(unit_id)
+    enriched: List[Dict[str, Any]] = []
+    for policy in policies:
+        steps = await ApprovalPolicy.get_steps(policy["id"])
+        policy["steps"] = steps
+        enriched.append(policy)
+    return {"policies": enriched}
+
+
+@approval_policies_router.post("/default")
+async def upsert_default_policy(
+    data: ApprovalPolicyUpsert,
+    auth: dict = Depends(require_permission("config.manage")),
+):
+    org_id = auth.get("organization_id")
+    if org_id:
+        unit = await db.query_one("SELECT organization_id FROM units WHERE id = $1", data.unit_id)
+        if not unit or unit.get("organization_id") != org_id:
+            raise HTTPException(status_code=404, detail="Department not found")
+    policy = await ApprovalPolicy.upsert_default_policy(
+        organization_id=org_id,
+        unit_id=data.unit_id,
+        name=data.name,
+    )
+    steps = await ApprovalPolicy.replace_steps(
+        policy_id=policy["id"],
+        steps=[step.model_dump() for step in data.steps],
+    )
+    policy["steps"] = steps
+    return {"policy": policy}
+
+
+# ---------------------------------------------------------
 # Register Sub-Routers
 # ---------------------------------------------------------
 router.include_router(units_router)
 router.include_router(grades_router)
 router.include_router(locations_router)
+router.include_router(approval_policies_router)
 # Categories router removed (handled by CategoryController)

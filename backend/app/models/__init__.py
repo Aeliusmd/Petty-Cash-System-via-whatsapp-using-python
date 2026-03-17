@@ -13,6 +13,7 @@ from app.models.otp import OTP
 from app.models.conversation import Conversation
 from app.models.audit_log import AuditLog
 from app.models.rates import Location, Grade, BattaRate, CategoryCap
+from app.models.approval import ApprovalPolicy
 
 __all__ = [
     'BaseModel',
@@ -27,5 +28,6 @@ __all__ = [
     'Location',
     'Grade',
     'BattaRate',
-    'CategoryCap'
+    'CategoryCap',
+    'ApprovalPolicy'
 ]

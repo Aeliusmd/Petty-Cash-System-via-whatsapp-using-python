@@ -25,6 +25,44 @@ interface Category {
   prompt_message?: string;
 }
 
+interface ApprovalStep {
+  id?: number;
+  step_order: number;
+  role_type: string;
+  assignee_employee_id?: number | null;
+  assignee_name?: string;
+  is_required: boolean;
+}
+
+interface ApprovalPolicy {
+  id: number;
+  unit_id: number;
+  name: string;
+  is_default: boolean;
+  is_active: boolean;
+  steps: ApprovalStep[];
+}
+
+interface EmployeeLite {
+  id: number;
+  name: string;
+  role: string;
+  unit_id: number | null;
+  role_id: number | null;
+}
+
+interface RoleOption {
+  id: number;
+  code: string;
+  name: string;
+}
+
+interface DepartmentRoleOption {
+  code: string;
+  label: string;
+  employeeName: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4101';
 
 export default function SettingsPage() {
@@ -33,7 +71,7 @@ export default function SettingsPage() {
   // permRefreshed gates all data fetches — we only set it true once we have
   // a definitive answer from the server (not just stale localStorage).
   const [permRefreshed, setPermRefreshed] = useState(false);
-  const [activeTab, setActiveTab] = useState<'departments' | 'categories'>('departments');
+  const [activeTab, setActiveTab] = useState<'departments' | 'categories' | 'approvals'>('departments');
 
   // Departments state
   const [departments, setDepartments] = useState<Unit[]>([]);
@@ -56,6 +94,58 @@ export default function SettingsPage() {
     display_order: 0,
     prompt_message: ''
   });
+
+  // Approval policies state
+  const [selectedApprovalDeptId, setSelectedApprovalDeptId] = useState<number | null>(null);
+  const [approvalPolicies, setApprovalPolicies] = useState<ApprovalPolicy[]>([]);
+  const [loadingApprovals, setLoadingApprovals] = useState(false);
+  const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [orgRoles, setOrgRoles] = useState<RoleOption[]>([]);
+  const [approvalFormData, setApprovalFormData] = useState({
+    name: 'Default Department Approval',
+    steps: [{ step_order: 1, role_type: 'MANAGER', assignee_employee_id: null as number | null, is_required: true }]
+  });
+
+  // Build department-specific role options — show only roles held by employees in the selected department
+  const departmentRoleOptions: DepartmentRoleOption[] = (() => {
+    if (!selectedApprovalDeptId) return [];
+
+    // Group employees in the selected department by their role
+    const deptRoleGroups: Record<string, string[]> = {};
+    for (const emp of employees) {
+      const roleCode = (emp.role || '').toLowerCase();
+      if (!roleCode || roleCode === 'staff') continue;
+      if (emp.unit_id !== selectedApprovalDeptId) continue;
+
+      if (!deptRoleGroups[roleCode]) deptRoleGroups[roleCode] = [];
+      deptRoleGroups[roleCode].push(emp.name);
+    }
+
+    const options: DepartmentRoleOption[] = [];
+    const seen = new Set<string>();
+
+    // Show ONLY roles that have employees in this department
+    for (const role of orgRoles) {
+      const rCode = role.code.toLowerCase();
+      if (rCode === 'staff' || seen.has(rCode)) continue;
+      seen.add(rCode);
+
+      const names = deptRoleGroups[rCode];
+      if (!names || names.length === 0) continue; // Skip roles with no employees in this dept
+
+      const namesStr = names.length <= 2
+        ? names.join(', ')
+        : `${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
+
+      options.push({
+        code: role.code.toUpperCase(),
+        label: `${role.name} (${namesStr})`,
+        employeeName: namesStr
+      });
+    }
+
+    return options;
+  })();
 
   // Permission-based access - allow view or manage
   const canViewConfig = hasPermission('config.view');
@@ -82,6 +172,8 @@ export default function SettingsPage() {
     if (!permRefreshed || isLoading) return;
     if (user?.organization_id) {
       fetchDepartments();
+      fetchEmployees();
+      fetchRoles();
     }
   }, [user, isLoading, permRefreshed]);
 
@@ -89,7 +181,7 @@ export default function SettingsPage() {
 
   const fetchDepartments = async () => {
     try {
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/units?organization_id=${user?.organization_id}`);
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/units?organization_id=${user?.organization_id}`, { cache: 'no-store' });
       const data = await res.json();
       setDepartments(data.units || []);
     } catch (error) {
@@ -103,7 +195,7 @@ export default function SettingsPage() {
   const fetchCategories = async (deptId: number) => {
     setLoadingCats(true);
     try {
-      const res = await authenticatedFetch(`${API_BASE_URL}/api/categories?unit_id=${deptId}`);
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/categories?unit_id=${deptId}`, { cache: 'no-store' });
       const data = await res.json();
       setCategories(data.categories || []);
     } catch (error) {
@@ -111,6 +203,130 @@ export default function SettingsPage() {
       setCategories([]);
     } finally {
       setLoadingCats(false);
+    }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      // Pass organization_id so super admins get correctly scoped employees
+      const orgParam = user?.organization_id ? `?organization_id=${user.organization_id}` : '';
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/employees${orgParam}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setEmployees((data.employees || []).map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        role: e.role,
+        unit_id: e.unit_id ?? null,
+        role_id: e.role_id ?? null,
+      })));
+    } catch (error) {
+      console.error('Error fetching employees for approvals:', error);
+    }
+  };
+
+  const fetchRoles = async () => {
+    try {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/roles`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const list: RoleOption[] = (Array.isArray(data) ? data : data.roles || []).map((r: any) => ({
+        id: r.id,
+        code: r.code,
+        name: r.name,
+      }));
+      setOrgRoles(list);
+    } catch (error) {
+      console.error('Error fetching roles:', error);
+    }
+  };
+
+  const fetchApprovalPolicies = async (deptId: number) => {
+    setLoadingApprovals(true);
+    try {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/approval-policies?unit_id=${deptId}`);
+      const data = await res.json();
+      const list = data.policies || [];
+      setApprovalPolicies(list);
+      const defaultPolicy = list.find((p: ApprovalPolicy) => p.is_default) || list[0];
+      if (defaultPolicy) {
+        setApprovalFormData({
+          name: defaultPolicy.name,
+          steps: defaultPolicy.steps?.length
+            ? defaultPolicy.steps.map((s: any) => ({
+                step_order: s.step_order,
+                role_type: s.role_type,
+                assignee_employee_id: s.assignee_employee_id ?? null,
+                is_required: s.is_required ?? true
+              }))
+            : [{ step_order: 1, role_type: 'MANAGER', assignee_employee_id: null, is_required: true }]
+        });
+      } else {
+        setApprovalFormData({
+          name: 'Default Department Approval',
+          steps: [{ step_order: 1, role_type: 'MANAGER', assignee_employee_id: null, is_required: true }]
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching approval policies:', error);
+      setApprovalPolicies([]);
+    } finally {
+      setLoadingApprovals(false);
+    }
+  };
+
+  const addApprovalStep = () => {
+    setApprovalFormData((prev) => ({
+      ...prev,
+      steps: [
+        ...prev.steps,
+        {
+          step_order: prev.steps.length + 1,
+          role_type: 'MANAGER',
+          assignee_employee_id: null,
+          is_required: true
+        }
+      ]
+    }));
+  };
+
+  const removeApprovalStep = (index: number) => {
+    setApprovalFormData((prev) => ({
+      ...prev,
+      steps: prev.steps
+        .filter((_, i) => i !== index)
+        .map((s, i) => ({ ...s, step_order: i + 1 }))
+    }));
+  };
+
+  const saveApprovalPolicy = async () => {
+    if (!selectedApprovalDeptId) return;
+    try {
+      const payload = {
+        unit_id: selectedApprovalDeptId,
+        name: approvalFormData.name || 'Default Department Approval',
+        steps: approvalFormData.steps.map((s, i) => ({
+          step_order: i + 1,
+          role_type: s.role_type,
+          assignee_employee_id: s.assignee_employee_id || null,
+          is_required: true
+        }))
+      };
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/approval-policies/default`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        alert(`Error: ${error.detail || 'Failed to save approval policy'}`);
+        return;
+      }
+      fetchApprovalPolicies(selectedApprovalDeptId);
+      alert('Approval policy saved');
+    } catch (error) {
+      console.error('Error saving approval policy:', error);
+      alert('Failed to save approval policy');
     }
   };
 
@@ -277,6 +493,16 @@ export default function SettingsPage() {
             }`}
           >
             Categories
+          </button>
+          <button
+            onClick={() => setActiveTab('approvals')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'approvals'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-300'
+            }`}
+          >
+            Approval Routes
           </button>
         </nav>
       </div>
@@ -570,6 +796,144 @@ export default function SettingsPage() {
                 </>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* Approval Routes Tab */}
+      {activeTab === 'approvals' && (
+        <div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-2">Select Department</label>
+            <select
+              value={selectedApprovalDeptId || ''}
+              onChange={(e) => {
+                const deptId = parseInt(e.target.value);
+                setSelectedApprovalDeptId(deptId);
+                if (!Number.isNaN(deptId)) fetchApprovalPolicies(deptId);
+              }}
+              className="border rounded px-3 py-2 w-full md:w-72"
+            >
+              <option value="">-- Select Department --</option>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name} ({dept.code})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedApprovalDeptId && (
+            <div className="bg-white rounded-lg shadow p-4 space-y-4">
+              {loadingApprovals ? (
+                <p>Loading approval routes...</p>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Default Policy Name</label>
+                    <input
+                      type="text"
+                      value={approvalFormData.name}
+                      onChange={(e) => setApprovalFormData((prev) => ({ ...prev, name: e.target.value }))}
+                      className="w-full md:w-96 border rounded px-3 py-2"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">Approval Steps</h3>
+                      {canManageConfig && (
+                        <button
+                          type="button"
+                          onClick={addApprovalStep}
+                          className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 text-sm"
+                        >
+                          + Add Step
+                        </button>
+                      )}
+                    </div>
+
+                    {approvalFormData.steps.map((step, index) => (
+                      <div key={index} className="border rounded p-3 grid md:grid-cols-4 gap-3 items-end">
+                        <div>
+                          <label className="text-xs text-gray-500">Step</label>
+                          <input
+                            type="number"
+                            value={index + 1}
+                            disabled
+                            className="w-full border rounded px-2 py-1 bg-gray-50"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500">Role Type</label>
+                          <select
+                            value={step.role_type}
+                            onChange={(e) => {
+                              const role_type = e.target.value;
+                              setApprovalFormData((prev) => ({
+                                ...prev,
+                                steps: prev.steps.map((s, i) => (i === index ? { ...s, role_type } : s))
+                              }));
+                            }}
+                            className="w-full border rounded px-2 py-1"
+                          >
+                            <option value="">-- Select Role --</option>
+                            {departmentRoleOptions.map((r) => (
+                              <option key={r.code} value={r.code}>
+                                {r.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500">User Override (Optional)</label>
+                          <select
+                            value={step.assignee_employee_id || ''}
+                            onChange={(e) => {
+                              const assignee = e.target.value ? parseInt(e.target.value) : null;
+                              setApprovalFormData((prev) => ({
+                                ...prev,
+                                steps: prev.steps.map((s, i) => (i === index ? { ...s, assignee_employee_id: assignee } : s))
+                              }));
+                            }}
+                            className="w-full border rounded px-2 py-1"
+                          >
+                            <option value="">Role-based auto-assign</option>
+                            {employees.map((emp) => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.name} ({emp.role})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          {canManageConfig && approvalFormData.steps.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeApprovalStep(index)}
+                              className="text-red-600 hover:text-red-800 text-sm"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {canManageConfig && (
+                    <div>
+                      <button
+                        onClick={saveApprovalPolicy}
+                        className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+                      >
+                        Save Approval Route
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

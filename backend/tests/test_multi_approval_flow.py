@@ -52,6 +52,20 @@ class TestMultiApprovalFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["next_assignee_id"], 6)
         self.assertEqual(result["approved_step"], 1)
 
+    async def test_reject_step_returns_correct_step_order(self):
+        """Regression: reject at step 2 must return rejected_step=2, not 1."""
+        claim = Claim({"id": 10, "employee_id": 3, "manager_id": 4})
+        current_task = {"id": 20, "step_order": 2, "assignee_employee_id": 6}
+        updated_claim = Claim({"id": 10, "status_code": "REJECTED"})
+
+        with patch.object(Claim, "find_by_id", AsyncMock(side_effect=[claim, updated_claim])):
+            with patch.object(Claim, "get_current_pending_task", AsyncMock(return_value=current_task)):
+                with patch("app.models.claim.db.query", AsyncMock(return_value=[{"id": 3}])):
+                    result = await Claim.reject_step(claim_id=10, approver_id=6, reason="not enough details")
+
+        self.assertEqual(result["rejected_step"], 2)
+        self.assertNotIn("approved_step", result)
+
 
 if __name__ == "__main__":
     unittest.main()

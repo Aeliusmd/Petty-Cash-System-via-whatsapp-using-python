@@ -391,7 +391,7 @@ Example: *Reject {claim_id} Invalid receipt* or *Reject {claim_id} Missing detai
             if is_final:
                 await notification_service.notify_staff_of_rejection(updated_claim, reason)
             else:
-                rejected_step = result.get("approved_step", 1) # reusing identical logic
+                rejected_step = result.get("rejected_step", 1)
                 await notification_service.notify_staff_of_step_rejection(updated_claim, employee.get('name', 'Approver'), rejected_step, reason)
                 
             

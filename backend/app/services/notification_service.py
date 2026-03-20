@@ -237,7 +237,7 @@ You can appeal this decision by typing "appeal"."""
 
 async def notify_staff_claim_submitted(claim: dict, employee: dict) -> bool:
     """
-    Send confirmation to staff when claim is submitted (optional enhanced message)
+    Send confirmation to staff when claim is submitted via web
     
     Args:
         claim: The claim dict
@@ -246,9 +246,65 @@ async def notify_staff_claim_submitted(claim: dict, employee: dict) -> bool:
     Returns:
         True if notification sent successfully
     """
-    # This is optional - the reply_engine already sends confirmation
-    # This can be used for additional notifications if needed
-    return True
+    try:
+        claim = _claim_to_dict(claim)
+        chat_id = employee.get('whatsapp_chat_id')
+        if not chat_id:
+            return False
+            
+        full_claim = await claim_model.find_by_id(claim['id'])
+        if not full_claim:
+            return False
+            
+        is_advance = full_claim.get('claim_type') == 'advance'
+        
+        if is_advance:
+            message = f"""🎉 *Advance Request Submitted!*
+
+📋 Ref: *{full_claim['claim_number']}*
+💵 Amount: {format_currency(full_claim.get('user_amount'))}
+⏳ Status: Pending Approval
+
+Type "menu" to start over."""
+        else:
+            # Reimbursement flow
+            category_name = full_claim.get('category_name', 'N/A')
+            final_amount = full_claim.get('system_amount') or full_claim.get('user_amount') or 0
+            
+            # Get manager notice similar to reply_engine
+            manager_notice = ''
+            pending_task = await claim_model.get_current_pending_task(full_claim['id'])
+            if pending_task and pending_task.get('assignee_employee_id'):
+                assignee = await employee_model.find_by_id(pending_task['assignee_employee_id'])
+                assignee_name = assignee.get('name') if assignee else None
+                if assignee_name:
+                    manager_notice = f"\n\n📤 Sent to *{assignee_name}* for step {pending_task.get('step_order', 1)} approval."
+            
+            # Diff section
+            diff_section = ""
+            receipts = await claim_model.get_receipts(full_claim['id'])
+            if receipts and final_amount > 0:
+                receipt_total = sum(float(r.get('ocr_amount', 0)) for r in receipts)
+                diff = abs(receipt_total - float(final_amount))
+                diff_pct = (diff / float(final_amount)) * 100
+                if diff_pct > 5:
+                    diff_section = f"\n⚠️ *Difference:* Rs. {diff:,.0f} ({diff_pct:.1f}%)"
+
+            message = f"""🎉 *Claim Submitted Successfully!*
+
+📋 Claim #: *{full_claim['claim_number']}*
+📁 Category: {category_name}
+💵 Amount: {format_currency(final_amount)}{diff_section}{manager_notice}
+
+Type "menu" to submit another claim."""
+
+        await waha_client.send_text(chat_id, message)
+        print(f"✅ Sent web submission confirmation to {employee.get('name')}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error sending submission notification: {e}")
+        return False
 
 
 async def notify_staff_of_appeal_submitted(claim: dict) -> bool:

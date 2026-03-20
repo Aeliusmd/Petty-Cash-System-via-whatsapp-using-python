@@ -15,6 +15,9 @@ from app.services.notification_service import (
     notify_staff_of_approval,
     notify_staff_of_rejection,
     notify_next_approver_of_claim,
+    notify_staff_claim_submitted,
+    notify_staff_of_step_approval,
+    notify_staff_of_step_rejection,
 )
 from app.schemas.claim import (
     ClaimCreate, ClaimUpdate, ClaimApproveRequest, ClaimRejectRequest, 
@@ -340,6 +343,15 @@ class ClaimController(BaseController):
         else:
             warnings = []
         
+        # Notify claimant of submission
+        try:
+            claim_dict = claim.to_dict()
+            claim_dict['employee_name'] = employee.name
+            claim_dict['employee_code'] = employee.employee_code
+            await notify_staff_claim_submitted(claim_dict, employee.to_dict())
+        except Exception as e:
+            print(f"⚠️ Failed to notify claimant: {e}")
+
         # Notify first approver (falls back to manager in legacy mode)
         try:
             claim_dict = claim.to_dict()
@@ -351,7 +363,10 @@ class ClaimController(BaseController):
         except Exception as e:
             print(f"⚠️ Failed to notify approver: {e}")
         
-        return self.success_response(data=claim.to_dict(), message="Claim created successfully")
+        return self.success_response(
+            data={"claim": claim.to_dict(), "warnings": warnings},
+            message="Claim created successfully"
+        )
     
     async def create_advance_claim(
         self,
@@ -443,19 +458,29 @@ class ClaimController(BaseController):
             print(f"✅ Saved {len(quotation_data)} quotations for advance claim {claim.id}")
             warnings = result.get('warnings', [])
         
+        # Notify claimant of submission
+        try:
+            employee_id = claim.employee_id
+            from app.models.employee import Employee
+            employee = await Employee.find_by_id(employee_id)
+            if employee:
+                await notify_staff_claim_submitted(claim.to_dict(), employee.to_dict())
+        except Exception as e:
+            print(f"⚠️ Failed to notify claimant: {e}")
+
         # Notify first approver (falls back to manager in legacy mode)
         try:
             claim_dict = claim.to_dict()
-            claim_dict['employee_name'] = employee.name
-            claim_dict['employee_code'] = employee.employee_code
             notified = await notify_next_approver_of_claim(claim_dict)
             if not notified:
-                await notify_manager_of_new_claim(claim_dict, duplicate_warnings=warnings)
+                await notify_manager_of_new_claim(claim_dict)
         except Exception as e:
             print(f"⚠️ Failed to notify approver: {e}")
         
-        return self.success_response(data=claim.to_dict(), message="Advance claim created successfully")
-
+        return self.success_response(
+            data={"claim": claim.to_dict()},
+            message="Advance claim created successfully"
+        )
     
     async def approve_claim(
         self,
@@ -482,6 +507,11 @@ class ClaimController(BaseController):
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
 
+        # Workflow result (if available from service)
+        workflow_result = getattr(claim, '_workflow_result', None)
+
+        approver_id = auth['employee_id']
+
         if claim.status_code == 'APPROVED':
             try:
                 await notify_staff_of_approval(claim.to_dict())
@@ -489,11 +519,22 @@ class ClaimController(BaseController):
                 print(f"⚠️ Failed to notify staff: {e}")
         else:
             try:
+                # Notify next approver
                 await notify_next_approver_of_claim(claim.to_dict())
+                
+                # Notify claimant of step approval (parity with WhatsApp)
+                if workflow_result:
+                    from app.models.employee import Employee
+                    approver = await Employee.find_by_id(approver_id)
+                    await notify_staff_of_step_approval(
+                        claim.to_dict(),
+                        approver.name if approver else "Approver",
+                        workflow_result.get('approved_step'),
+                        workflow_result.get('next_assignee_id')
+                    )
             except Exception as e:
-                print(f"⚠️ Failed to notify next approver: {e}")
+                print(f"⚠️ Failed to notify: {e}")
         
-        # Get spending summary after approval
         from app.models.claim import Claim as ClaimModel
         spending_summary = await ClaimModel.get_employee_spending_summary(claim.employee_id)
         
@@ -527,8 +568,19 @@ class ClaimController(BaseController):
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
         
+        # Send step-specific rejection notification (matching WhatsApp parity)
         try:
-            await notify_staff_of_rejection(claim.to_dict(), data.reason)
+            workflow_result = getattr(claim, '_workflow_result', None)
+            if workflow_result:
+                rejected_step = workflow_result.get('rejected_step', 1)
+            else:
+                rejected_step = 1
+            from app.models.employee import Employee
+            approver = await Employee.find_by_id(auth['employee_id'])
+            approver_name = approver.name if approver else 'Approver'
+            await notify_staff_of_step_rejection(
+                claim.to_dict(), approver_name, rejected_step, data.reason
+            )
         except Exception as e:
             print(f"⚠️ Failed to notify staff: {e}")
         

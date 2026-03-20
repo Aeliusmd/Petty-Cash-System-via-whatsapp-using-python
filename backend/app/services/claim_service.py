@@ -103,6 +103,8 @@ class ClaimService(BaseService):
         
         workflow_result = await Claim.approve_step(claim_id, approver_id, final_amount)
         claim = workflow_result["claim"]
+        # Attach workflow result for notification parity with WhatsApp flow
+        setattr(claim, '_workflow_result', workflow_result)
         
         # Record status change
         next_assignee_id = workflow_result.get("next_assignee_id")
@@ -152,6 +154,8 @@ class ClaimService(BaseService):
         
         workflow_result = await Claim.reject_step(claim_id, approver_id, reason)
         claim = workflow_result["claim"]
+        # Attach workflow result for notification parity (step number)
+        setattr(claim, '_workflow_result', workflow_result)
         
         # Record status change
         await Claim.record_status_change(
